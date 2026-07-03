@@ -10,9 +10,9 @@ Webカメラで顔の向き・口の動きに同調する、配信向けブラ�
 [![MediaPipe](https://img.shields.io/badge/MediaPipe-Tasks_Vision-0097A7?logo=google&logoColor=white)](https://ai.google.dev/edge/mediapipe)
 [![Deploy](https://github.com/tommie-jp/guruguru-avatar/actions/workflows/pages.yml/badge.svg)](https://github.com/tommie-jp/guruguru-avatar/actions/workflows/pages.yml)
 
-[![ぐるぐるアバター](public/ogp.png)](https://tommie-jp.github.io/guruguru-avatar/)
+[![ぐるぐるアバター デモ](docs/hero-GIF-v1.9.0.gif)](https://tommie-jp.github.io/guruguru-avatar/)
 
-## [🎥 ライブデモを開く（要Webカメラ）](https://tommie-jp.github.io/guruguru-avatar/)
+## [🎥 ライブデモを開く](https://tommie-jp.github.io/guruguru-avatar/)
 
 </div>
 
@@ -65,6 +65,8 @@ npm run dev
 ## 📺 OBS・配信で使う
 
 カメラ版はそのまま OBS のブラウザソースに重ねられます。
+
+[<img src="docs/OBS-v1.9.0-edit.gif" width="480" alt="OBS 配信デモ（上: OBS の透過オーバーレイ / 下: 送信側ブラウザ ?tx）">](docs/OBS-v1.9.0-edit.gif)
 
 - `index.html?obs=1` … **ステージモード**（背景透過＋UI 非表示。アバターだけを表示）
 - 影の濃さは Tweaks パネルの「影の濃さ」(0〜6) で調整（旧 `?shadow=N` は廃止）
@@ -189,8 +191,8 @@ http://127.0.0.1:4173/guruguru-avatar/
 ├── public/
 │   ├── slices2/            # スライス済みキャラ画像（Git 追跡）
 │   ├── mediapipe/          # MediaPipe モデル（npm script で配置）
-│   └── ogp.png             # OGP / ヒーロー画像
-├── docs/                   # 画像生成・キャラ差し替え資料
+│   └── ogp.png             # OGP 画像
+├── docs/                   # 画像生成・キャラ差し替え資料・README 素材
 ├── docs-camera/            # カメラ版・OBS 配信などの手順
 ├── tools/slice_character_sheets.py
 ├── LICENSE                 # プログラム（MIT）
