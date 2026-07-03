@@ -1265,6 +1265,7 @@ function App() {
   // アンマウント時にフィードバック用タイマーを後始末する（解除後の setState を避ける）。
   useEffect(() => () => {
     Object.values(dirFlashTimersRef.current).forEach(clearTimeout);
+    clearTimeout(centerCalibFlashTimerRef.current);
   }, []);
 
   // ユーザー操作（移動・ズーム）2層の現在値を userRef に反映。操作 effect とボタンの共通経路。
@@ -1279,6 +1280,18 @@ function App() {
     u.local.x = 0; u.local.y = 0; u.local.zoom = 1;
     applyUserTransform();
   }
+
+  // アバターのダブルクリックで「表示（移動・ズーム）リセット＋向き校正（正）」をまとめて行う。
+  // 操作 effect は [] 依存でマウント時固定のため、最新クロージャを ref 経由で呼んで陳腐化を避ける
+  // （毎レンダー張り替え。calibrateAll の入力は ref 主体だが setTweak 等もあるので安全側に倒す）。
+  const dblRecenterRef = useRef(null);
+  useEffect(() => {
+    dblRecenterRef.current = () => {
+      resetUserTransform();   // 手動の移動・ズームを中央・等倍へ
+      calibrateCenterCross(); // 今の向き・距離・目・かしげを正面基準に取り直す
+      flashCenterCalib();     // アバター上に「✓ 正面を校正」ピルを短く出す
+    };
+  });
 
   // ユーザーズームの上下限(Tweaks)を変えたら、現在のズーム値を新範囲へ即クランプし直して
   // 表示へ反映する。スライダー操作だけで最小/最大が「今すぐ」効くようにする（次のホイール
@@ -1393,7 +1406,7 @@ function App() {
   // 顔追従(motionRef/zoomRef)とは別の最外ラッパー(userRef)へ直書きするので互いに干渉しない。
   // 操作は2層: 通常は shared（CEF へ送り rx も同調）、Shift 併用は local（この端末だけ・送らない）。
   // 表示は両者の合成（移動=加算 vw/vh / ズーム=乗算）。rx 自身は受信値を commit が当てるので無効化。
-  // ダブルクリックで両層リセット。
+  // ダブルクリックで「両層リセット＋向き校正（正）」をまとめて実行（dblRecenterRef 経由）。
   useEffect(() => {
     if (isRx) return undefined;   // rx は受信した userTransform を commit が反映するので操作は受けない
     const el = userRef.current;
@@ -1476,8 +1489,9 @@ function App() {
         tw.userZoomMin ?? USER_ZOOM_MIN, tw.userZoomMax ?? USER_ZOOM_MAX);
       apply();
     };
-    // 両層を初期化（位置中央・等倍）。リセットボタンと共通経路。
-    const onReset = () => resetUserTransform();
+    // ダブルクリック: 表示（移動・ズーム）リセット＋向き校正（正）をまとめて実行。
+    // 最新クロージャを ref 経由で呼ぶ（この effect は [] 依存でマウント時固定のため）。
+    const onReset = () => dblRecenterRef.current?.();
 
     el.addEventListener('pointerdown', onDown);
     el.addEventListener('pointermove', onMove);
@@ -1847,6 +1861,22 @@ function App() {
        </div>
       </div>
       </div>
+
+      {/* ダブルクリック校正のフィードバック。正ボタン(校正パネル)が隠れていても効いたと分かるよう
+          画面中央上に短く出す。配信(OBS)へは焼き込まないよう !obsMode のときだけ表示。 */}
+      {centerCalibFlash && !obsMode ? (
+        <div
+          aria-live="polite"
+          style={{
+            position: 'absolute', top: '14%', left: '50%', transform: 'translateX(-50%)',
+            zIndex: 6, pointerEvents: 'none',
+            padding: '6px 14px', borderRadius: 999,
+            background: 'rgba(35,46,38,0.86)', color: '#fff',
+            fontSize: 14, fontWeight: 700, letterSpacing: '0.04em', whiteSpace: 'nowrap',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
+          }}
+        >✓ 正面を校正</div>
+      ) : null}
 
       {/* リアクション・スタンプ。アバター本体(charRef)の実位置・サイズに毎フレーム追従
           （顔追従/ドラッグ/ズームに連動）。place で 頭の上/頭にオーバーレイ を切替。obs でも表示。 */}
