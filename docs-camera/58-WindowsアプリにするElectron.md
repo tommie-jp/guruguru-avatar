@@ -95,6 +95,25 @@ tailscale serve --bg --https=443 http://127.0.0.1:5179
 検出できないときは QR は loopback の http のままになる（同一機ブラウザでの tx 用）。
 詳しくは `17-localhostとtailscaleを同時に使う.md` を参照。
 
+## 動作確認チェックリスト（iPhone tx）
+
+初回や配布先で、スマホ(tx) → OBS(rx) が通るかを順に確認する。
+
+1. PC で Tailscale が起動・ログイン済み（管理コンソールで MagicDNS と HTTPS Certificates が ON）。
+2. アプリ起動ログに `[guru] tailscale FQDN: <fqdn>` と `スマホtx URL` が出る
+   （出ないときは Tailscale を起動して再起動）。
+3. PC で 1 度だけ `tailscale serve --bg --https=443 http://127.0.0.1:5179` を実行し、
+   `tailscale serve status` が `https://<fqdn>` → `http://127.0.0.1:5179` を示す。
+4. 窓の「カメラ源トグル」を **スマホ(QR)** にすると、PC カメラが止まり QR が前面に出る。
+5. iPhone（同一 tailnet・Tailscale ON）で QR を読み、Safari で
+   `https://<fqdn>/index.html?tx` が開く。
+6. カメラ許可 → 自分の顔が映る（映らないときは手順 1・3 と MagicDNS + HTTPS を再確認）。
+7. OBS のブラウザソースに `http://127.0.0.1:5179/index.html?rx&obs` を入れ、
+   アバターが透過で出る。
+8. 顔の向き・口の動きが OBS のアバターに同調する。
+9. 1〜2 分放置しても切断しない（切れる場合は `tailscale serve` の既知 idle-drop の可能性。
+   Tailscale を更新するか、再接続で復帰する）。
+
 ## 注意
 
 - **SmartScreen 警告**: コード署名をしていないため、初回起動で「発行元不明」が出る。

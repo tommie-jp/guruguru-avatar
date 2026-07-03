@@ -70,6 +70,7 @@ npm run dev
 - 影の濃さは Tweaks パネルの「影の濃さ」(0〜6) で調整（旧 `?shadow=N` は廃止）
 - ステージモード中は **`T` キー**で Tweaks パネルを開閉
 - 手順の詳細は [docs-camera/04-OBSでライブ配信.md](docs-camera/04-OBSでライブ配信.md)
+- スマホをカメラにして PC で配信したい・Node 不要の単体 `.exe` にしたい場合は [docs-camera/58-WindowsアプリにするElectron.md](docs-camera/58-WindowsアプリにするElectron.md)
 
 OBS で使う場合は、Tweaks の背景色をクロマキーしやすい色に調整するのも有効です。
 
