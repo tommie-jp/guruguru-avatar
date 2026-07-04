@@ -1,5 +1,12 @@
 # 単体バイナリにする（Node も Bun も不要で配る）
 
+> **注意（win-v1.10.0〜）**: 一般向けの配布はデスクトップアプリ（Electron）に一本化し、
+> この文書の**配布 zip（バイナリ + start スクリプト + README.txt）の生成・リリース経路は
+> 廃止**した。`doBuild.sh` も Electron 成果物のビルダーに変わっている
+> （[58-WindowsアプリにするElectron.md](58-WindowsアプリにするElectron.md) 参照）。
+> 単体リレイバイナリ自体は `npm run build:relay(:win|:linux|:macos)` で今も作れるので、
+> 以下は開発・特殊用途（別マシン中継など）向けの記録として残す。
+
 配布先に Node.js も Bun も入れたくないとき、中継 + 静的配信を 1 つのバイナリに固めて、
 `dist-local\`（配信物）と起動スクリプトを添えて配る。仕組みは **Bun の単一実行バイナリ**
 （`bun build --compile`）。ランタイム（Bun）がバイナリに同梱されるため、配布先には何も
@@ -23,37 +30,15 @@ macOS の 3 ターゲットをクロスコンパイルできる**（旧 SEA の�
 
 ## かんたんビルド
 
-経路は 2 つ。WSL/Linux が使えるなら `doBuild.sh` が手軽。
+経路は 2 つ。WSL/Linux が使えるなら npm スクリプトが手軽。
 
-### 1) doBuild.sh（3 ターゲット一括・クロスコンパイル）
+### 1) npm run build:relay（3 ターゲット一括・クロスコンパイル）
 
 `guruguru-avatar\` フォルダで:
 
 ```bash
-./doBuild.sh
-```
-
-これで「dist-local ビルド → 3 ターゲットへクロスコンパイル → linux 版を実起動スモーク →
-win / linux / macOS の 3 つの配布 zip 化」までを 1 台で行う。bun は PATH か `~/.bun/bin` から
-解決する（`BUN=/path/to/bun ./doBuild.sh` で上書き可）。
-
-```plantuml
-@startuml
-skinparam shadowing false
-start
-:dist-local ビルド\n(npm run build:local);
-:3 ターゲットへクロスコンパイル\n(bun build --compile);
-fork
-  :win\nguruguru-relay.exe;
-fork again
-  :linux\nguruguru-relay-linux-x64;
-fork again
-  :macOS\nguruguru-relay-macos-arm64;
-end fork
-:linux 版を実起動スモーク\n(HTTP 200 を確認);
-:win / linux / macOS の\n3 つの配布 zip 化;
-stop
-@enduml
+npm run build:local     # 配信物（dist-local）を先に作る
+npm run build:relay     # 3 ターゲットへクロスコンパイル
 ```
 
 出力は `dist-exe\` に揃う:
@@ -61,12 +46,9 @@ stop
 - `guruguru-relay.exe` … Windows 版（中継 + 静的配信・ランタイム同梱・単体動作）
 - `guruguru-relay-linux-x64` … Linux 版
 - `guruguru-relay-macos-arm64` … macOS (Apple Silicon) 版
-- `dist-local\` … 配信物（index.html ほか）
-- `start.bat` / `start.sh` / `start.command` … 各 OS の起動用
-- `README.txt` … 配布先向けの説明
-- `guruguru-avatar-{win,linux,macos}-v<version>.zip` … 各 OS の配布 zip
 
-配布先には、対応する zip を渡して「すべて展開」してもらい、起動スクリプトを実行するだけ。
+かつて `doBuild.sh` が行っていた「start スクリプト + README.txt を添えて zip 化」は
+廃止した（必要なら旧タグ win-v1.9.3 時点の `doBuild.sh` を参照）。
 
 ### 2) windows/build-exe.ps1（Windows 単体）
 
@@ -109,14 +91,14 @@ npm run build:relay:macos   # bun-darwin-arm64 のみ
 
 ## 起動と接続
 
-起動コマンドは従来どおり。Windows なら `start.bat` が内部で次を実行する
-（ポートを変えたいときはここを編集）:
+起動コマンド（`dist-local` はバイナリの隣に置く。ポートは `--port` で変更）:
 
 ```bat
 guruguru-relay.exe --web-root dist-local --port 8787 --host 127.0.0.1
 ```
 
-Linux / macOS は `start.sh` / `start.command` が同様に各バイナリを起動する。
+Linux / macOS は各バイナリ（`guruguru-relay-linux-x64` / `guruguru-relay-macos-arm64`）を
+同じ引数で起動する。
 
 - 送信側(tx): `http://127.0.0.1:8787/?tx`（Edge/Chrome）
 - OBS 受信側(rx): `http://127.0.0.1:8787/?rx`（OBS のブラウザソース。rx は既定で透過＋UI 非表示）
@@ -125,9 +107,10 @@ LAN の別端末からも繋ぐなら `--host 0.0.0.0`（要ファイアウォ�
 
 ## WSL から作る・試す場合
 
-WSL/Linux なら **linux 版バイナリをその場で実起動して検証できる**（`doBuild.sh` の
-スモークテストがこれを自動で行い、HTTP 200 を確認する）。Windows 版 exe を WSL の interop
-で動かすことも引き続き可能。
+WSL/Linux なら **linux 版バイナリをその場で実起動して検証できる**
+（`./dist-exe/guruguru-relay-linux-x64 --web-root dist-local --port 18790` を起動して
+`curl` で HTTP 200 を確認する）。Windows 版 exe を WSL の interop で動かすことも
+引き続き可能。
 
 ## 注意
 
@@ -136,5 +119,5 @@ WSL/Linux なら **linux 版バイナリをその場で実起動して検証で�
   macOS 初回は Gatekeeper が出たら右クリック→「開く」で許可する。
 - **バイナリのサイズ**: ランタイム（Bun）を同梱するため数十 MB になる。これは単一実行
   バイナリの仕様。
-- **更新時**: コードや配信物を変えたら `doBuild.sh`（または `build-exe.ps1`）を再実行して
-  `dist-exe\` を作り直す。
+- **更新時**: コードや配信物を変えたら `npm run build:relay`（または `build-exe.ps1`）を
+  再実行して `dist-exe\` を作り直す。

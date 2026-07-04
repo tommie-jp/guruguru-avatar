@@ -1,8 +1,9 @@
 # ============================================================
 #  guruguru-relay.exe を生成する（Bun = bun build --compile）。
 #  Windows 単体で「Bun ランタイム同梱の単体 exe」を作る経路。
-#  ※ WSL/Linux/macOS が使えるなら ./doBuild.sh が win/linux/macOS の
-#     3 つを 1 台からクロスコンパイルするので、そちらが手軽。
+#  ※ WSL/Linux/macOS が使えるなら `npm run build:relay` が win/linux/macOS の
+#     3 つを 1 台からクロスコンパイルするので、そちらが手軽
+#     （./doBuild.sh は Electron アプリのビルダーに変わったため対象外）。
 #  ★ このスクリプトはプロジェクト一式（package.json / server\ / node_modules）が
 #     必要。guruguru-avatar\windows\build-exe.ps1 に置いた状態で実行する。
 #     .ps1 だけを Downloads 等にコピーしても動かない（先に git clone / コピーが必要）。

@@ -1,201 +1,179 @@
 #!/usr/bin/env bash
 #
-# リレイサーバ（中継 + 静的配信の単体実行ファイル）の配布 zip を「ビルドするだけ」の
-# スクリプト。GitHub へのアップロードはしない（それは ./doDeploy.sh win）。
+# 配布物（Electron デスクトップアプリ）を「ビルドするだけ」のスクリプト。
+# GitHub へのアップロードはしない（それは ./doDeploy.sh app）。
 #
-# ランタイムは Bun。`bun build --compile` で 3 ターゲットを「この 1 台から」クロス
-# コンパイルする（旧 Node SEA と違い Windows 上で作る必要はない）。
-#   - bun-windows-x64  → dist-exe/guruguru-relay.exe
-#   - bun-linux-x64    → dist-exe/guruguru-relay-linux-x64
-#   - bun-darwin-arm64 → dist-exe/guruguru-relay-macos-arm64
+#   - Windows: NSIS インストーラ + ポータブル exe（electron-builder --win。WSL では wine 必須）
+#   - Linux  : AppImage（electron-builder --linux。この場で起動スモークテストまで行う）
+#   - macOS  : 配布物なし。ビルドは macOS 実機でしかできず（electron-builder の制約）、
+#              実機テストも署名・公証もできないため配布しない方針
+#              （Web 版 か `npm run build:local && npm start` を案内する）。
 #
-# 生成物（各プラットフォームの配布 zip）:
-#   dist-exe/guruguru-avatar-win-v<version>.zip   guruguru-obs-win/   (exe + dist-local + start.bat + README.txt)
-#   dist-exe/guruguru-avatar-linux-v<version>.zip guruguru-obs-linux/ (bin + dist-local + start.sh  + README.txt)
-#   dist-exe/guruguru-avatar-macos-v<version>.zip guruguru-obs-macos/ (bin + dist-local + start.command + README.txt)
+# 旧 zip 配布（bun リレイサーバ + start スクリプト、win/linux/macos 3 種）は win-v1.10.0 で
+# 廃止した。単体リレイバイナリが必要なら `npm run build:relay(:win|:linux|:macos)` を直接使う。
 #
 set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-doBuild.sh — リレイサーバの配布 zip をビルド（アップロードはしない）
+doBuild.sh — Electron アプリの配布物をビルド（アップロードはしない）
 
 使い方:
-  ./doBuild.sh             win/linux/macOS の配布 zip を dist-exe/ に生成
-  ./doBuild.sh -h|--help   このヘルプを表示
+  ./doBuild.sh [all]           Windows + Linux の配布物を dist-electron/ に生成（既定）
+  ./doBuild.sh win             Windows のみ（NSIS インストーラ + ポータブル exe）
+  ./doBuild.sh linux           Linux のみ（AppImage。起動スモークテスト付き）
+  ./doBuild.sh smoke <file>    指定した AppImage の起動スモークテストだけを実行
+  ./doBuild.sh -h|--help       このヘルプを表示
 
 生成物:
-  dist-exe/guruguru-avatar-win-v<version>.zip    (guruguru-relay.exe)
-  dist-exe/guruguru-avatar-linux-v<version>.zip  (guruguru-relay-linux-x64)
-  dist-exe/guruguru-avatar-macos-v<version>.zip  (guruguru-relay-macos-arm64)
+  dist-electron/GuruguruAvatar-Setup-<version>.exe            (NSIS インストーラ)
+  dist-electron/GuruguruAvatar-<version>-portable.exe         (ポータブル exe)
+  dist-electron/GuruguruAvatar-<version>-linux-x86_64.AppImage (Linux AppImage)
 
-環境変数:
-  BUN   使用する bun のパス（既定: PATH の bun → なければ ~/.bun/bin/bun）
+前提:
+  Windows ターゲットは wine が必要（WSL/Linux 上の NSIS ビルドで使う）。
+  未導入なら: sudo dpkg --add-architecture i386 && sudo apt-get update &&
+              sudo apt-get install wine wine32:i386
 
-GitHub Release として配置するには:  ./doDeploy.sh win
+macOS 向けは配布しない（Web 版 か `npm run build:local && npm start` を案内）。
+
+GitHub Release として配置するには:  ./doDeploy.sh app
 USAGE
 }
 
-case "${1:-}" in
-  -h|--help|help) usage; exit 0 ;;
-  "") ;;
-  *) echo "不明な引数: $1"; echo; usage; exit 2 ;;
-esac
-
 # スクリプトの場所（＝リポジトリ）へ移動。どこから実行しても効くように。
+# （smoke の相対パス引数は呼び出し元の cwd 基準で解決するため先に控える）
+ORIG_PWD="$PWD"
 cd "$(dirname "$0")"
 
-# ── bun を解決（PATH → ~/.bun/bin → エラー） ──────────────────────────────
-BUN="${BUN:-}"
-if [ -z "$BUN" ]; then
-  if command -v bun >/dev/null 2>&1; then BUN="bun"
-  elif [ -x "$HOME/.bun/bin/bun" ]; then BUN="$HOME/.bun/bin/bun"
+MIN_ARTIFACT_SIZE=$((100 * 1024 * 1024)) # Electron 同梱で 140MB 超になる。下回るのは壊れたビルド
+
+# ── 成果物ゲート: バージョン付きの厳密名で存在＋サイズを検証する ─────────────
+# dist-electron には旧バージョンが残留しうるので glob では拾わない。壊れた NSIS
+# スタブ（数百 KB）を配布してしまう事故をここで止める。
+check_artifact() {
+  local f="$1" size
+  [ -f "$f" ] || { echo "エラー: 成果物が見つかりません: $f"; exit 1; }
+  size="$(stat -c%s "$f")"
+  if [ "$size" -lt "$MIN_ARTIFACT_SIZE" ]; then
+    echo "エラー: 成果物が小さすぎます（壊れたビルドの疑い）: $f (${size} bytes)"
+    exit 1
   fi
-fi
-if [ -z "$BUN" ] || ! "$BUN" --version >/dev/null 2>&1; then
-  echo "エラー: bun が見つかりません。"
-  echo "  → curl -fsSL https://bun.sh/install | bash でインストールし、"
-  echo "    BUN=/path/to/bun ./doBuild.sh で指定するか PATH を通してください。"
-  exit 1
-fi
-
-# 前提チェック
-command -v node >/dev/null 2>&1 || { echo "エラー: node が必要です（dist-local のビルドに使用）"; exit 1; }
-command -v zip  >/dev/null 2>&1 || { echo "エラー: zip が必要です（apt install zip）"; exit 1; }
-
-VERSION="$(node -p "require('./package.json').version")"
-echo "[info] bun=$("$BUN" --version)  version=$VERSION"
-
-WIN_BIN="dist-exe/guruguru-relay.exe"
-LINUX_BIN="dist-exe/guruguru-relay-linux-x64"
-MACOS_BIN="dist-exe/guruguru-relay-macos-arm64"
-
-echo "[1/5] 静的配信物をビルド (dist-local, base '/')..."
-npm run build:local
-
-echo "[2/5] リレイサーバを 3 ターゲットへクロスコンパイル..."
-mkdir -p dist-exe
-"$BUN" build --compile --minify --target=bun-windows-x64 server/relay.mjs --outfile "$WIN_BIN"
-"$BUN" build --compile --minify --target=bun-linux-x64    server/relay.mjs --outfile "$LINUX_BIN"
-"$BUN" build --compile --minify --target=bun-darwin-arm64 server/relay.mjs --outfile "$MACOS_BIN"
-chmod +x "$LINUX_BIN" "$MACOS_BIN"
-
-echo "[3/5] 検証: バイナリのサイズと linux 版の実起動..."
-for b in "$WIN_BIN" "$LINUX_BIN" "$MACOS_BIN"; do
-  sz=$(stat -c%s "$b")
-  # Bun ランタイム同梱で数十 MB になる。極端に小さい＝ビルド失敗とみなす。
-  [ "$sz" -gt 20000000 ] || { echo "エラー: $b が小さすぎます（size=$sz）。ビルド失敗。"; exit 1; }
-  echo "  OK $b (size=$sz)"
-done
-# linux 版はこの場で実起動して 200 を確認（win/mac は実機が無いのでサイズ検証のみ）。
-SMOKE_ROOT="$(mktemp -d)"; printf 'smoke-ok' > "$SMOKE_ROOT/index.html"
-SMOKE_PORT=18790
-"./$LINUX_BIN" --web-root "$SMOKE_ROOT" --port "$SMOKE_PORT" --host 127.0.0.1 >/dev/null 2>&1 &
-SMOKE_PID=$!
-sleep 1.2
-smoke_code=$(curl -fsS -o /dev/null -w '%{http_code}' "http://127.0.0.1:$SMOKE_PORT/" 2>/dev/null || echo "000")
-kill "$SMOKE_PID" 2>/dev/null || true
-rm -rf "$SMOKE_ROOT"
-[ "$smoke_code" = "200" ] || { echo "エラー: linux バイナリのスモークテスト失敗（HTTP $smoke_code）。"; exit 1; }
-echo "  OK linux 版スモークテスト (HTTP $smoke_code)"
-
-echo "[4/5] 配布物 (start スクリプト / README.txt) を生成..."
-
-# Windows 用 start.bat（exe の隣で実行・全 ASCII・CRLF）
-cat > dist-exe/start.bat <<'BAT'
-@echo off
-cd /d "%~dp0"
-start "guruguru-relay" /min guruguru-relay.exe --web-root dist-local --port 8787 --host 127.0.0.1
-timeout /t 2 /nobreak >nul
-start "" "http://127.0.0.1:8787/?tx"
-echo.
-echo  tx (send) : http://127.0.0.1:8787/?tx
-echo  rx (OBS)  : http://127.0.0.1:8787/?rx
-echo.
-pause
-BAT
-sed -i 's/\r$//; s/$/\r/' dist-exe/start.bat
-
-# Linux 用 start.sh
-cat > dist-exe/start.sh <<'SH'
-#!/usr/bin/env bash
-cd "$(dirname "$0")"
-chmod +x ./guruguru-relay-linux-x64 2>/dev/null || true
-./guruguru-relay-linux-x64 --web-root dist-local --port 8787 --host 127.0.0.1 &
-SRV=$!
-sleep 2
-( xdg-open "http://127.0.0.1:8787/?tx" >/dev/null 2>&1 & ) || true
-echo "tx (send) : http://127.0.0.1:8787/?tx"
-echo "rx (OBS)  : http://127.0.0.1:8787/?rx"
-echo "停止するには Ctrl+C"
-wait "$SRV"
-SH
-chmod +x dist-exe/start.sh
-
-# macOS 用 start.command（Finder のダブルクリックで実行できる）
-cat > dist-exe/start.command <<'CMD'
-#!/usr/bin/env bash
-cd "$(dirname "$0")"
-chmod +x ./guruguru-relay-macos-arm64 2>/dev/null || true
-./guruguru-relay-macos-arm64 --web-root dist-local --port 8787 --host 127.0.0.1 &
-SRV=$!
-sleep 2
-( open "http://127.0.0.1:8787/?tx" >/dev/null 2>&1 & ) || true
-echo "tx (send) : http://127.0.0.1:8787/?tx"
-echo "rx (OBS)  : http://127.0.0.1:8787/?rx"
-echo "停止するには Ctrl+C"
-wait "$SRV"
-CMD
-chmod +x dist-exe/start.command
-
-cat > dist-exe/README.txt <<'TXT'
-ぐるぐるアバター — OBS 用ローカルサーバ（Node も Bun も不要・ランタイム同梱）
-
-【使い方（Windows）】
- 1. このフォルダをローカルドライブ（例 C:\guruguru）にコピーする
-    ※ zip の中から直接実行せず、必ず「すべて展開」してから
- 2. start.bat をダブルクリック
-    - 送信側(tx)が既定ブラウザで開きます（カメラを許可）
- 3. OBS で「ソース → ブラウザ」を追加し、URL に次を貼る:
-       http://localhost:8787/?rx
-    背景は透過。tx の画面下に「CEF 接続中（1）」が出れば結線 OK。
-
-【使い方（Linux / macOS）】
- - Linux : 端末で ./start.sh （または実行権を付けてダブルクリック）
- - macOS : start.command をダブルクリック（初回は「制御 + 開く」で許可）
-
-【中身】
-   guruguru-relay(.exe / -linux-x64 / -macos-arm64)  中継 + 静的配信（ランタイム同梱・単体動作）
-   dist-local/          配信物（camera.html ほか）
-   start.bat / start.sh / start.command   起動用
-
-【注意】
- - 必ずローカルドライブから実行する。
- - Windows 初回に SmartScreen が出たら［詳細情報］→［実行］。
- - macOS 初回は Gatekeeper が出たら右クリック→「開く」で許可。
- - ポートを変えるときは start スクリプト内の --port を編集（rx/tx の URL も合わせる）。
- - LAN の別 PC からも繋ぐなら --host を 0.0.0.0 に（要ファイアウォール許可）。
-TXT
-sed -i 's/\r$//; s/$/\r/' dist-exe/README.txt
-
-echo "[5/5] 配布フォルダを組み立てて zip 化..."
-# $1=フォルダ名 $2=同梱バイナリ $3=起動スクリプト $4=出力zip
-package() {
-  local dir="$1" bin="$2" launcher="$3" zip="$4"
-  rm -rf "$dir" "$zip"
-  mkdir "$dir"
-  # 同一 FS 内はハードリンクで実体コピーを避ける（バイナリ 60-100MB / dist-local 大）。
-  cp -l "$bin" "$dir/" 2>/dev/null || cp "$bin" "$dir/"
-  cp -rl dist-local "$dir/dist-local" 2>/dev/null || cp -r dist-local "$dir/dist-local"
-  cp "$launcher" "$dir/"
-  cp dist-exe/README.txt "$dir/"
-  zip -r -q "$zip" "$dir"
-  rm -rf "$dir"
-  echo "  ✓ $zip ($(stat -c%s "$zip") bytes)"
+  echo "  OK $f (size=$size)"
 }
 
-package guruguru-obs-win   "$WIN_BIN"   dist-exe/start.bat     "dist-exe/guruguru-avatar-win-v${VERSION}.zip"
-package guruguru-obs-linux "$LINUX_BIN" dist-exe/start.sh      "dist-exe/guruguru-avatar-linux-v${VERSION}.zip"
-package guruguru-obs-macos "$MACOS_BIN" dist-exe/start.command "dist-exe/guruguru-avatar-macos-v${VERSION}.zip"
+require_wine() {
+  # Linux/WSL 上の NSIS ビルドはアンインストーラ抽出に wine が必須（回避設定なし）。
+  command -v wine >/dev/null 2>&1 && return 0
+  echo "エラー: wine が必要です（Linux/WSL 上の NSIS ビルドに使用）。"
+  echo "  → sudo dpkg --add-architecture i386 && sudo apt-get update \\"
+  echo "     && sudo apt-get install wine wine32:i386"
+  exit 1
+}
 
-echo "✓ ビルド完了（win / linux / macos の 3 zip を dist-exe/ に出力）"
+# ── AppImage の起動スモークテスト ────────────────────────────────────────────
+# 実際に起動し、内蔵サーバ（既定 5179・使用中なら ephemeral へフォールバック）の
+# 実ポートを起動ログから拾って HTTP 200 を確認する。固定ポート決め打ちはしない。
+smoke_appimage() {
+  local appimage="$1"
+  [ -f "$appimage" ] || { echo "エラー: AppImage が見つかりません: $appimage"; return 1; }
+
+  if [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    echo "（情報）ディスプレイが無いため AppImage の起動スモークをスキップします。"
+    return 0
+  fi
+
+  echo "== AppImage 起動スモーク: $appimage =="
+  local log pid port body extracted rc=1
+  log="$(mktemp)"
+
+  # - env -u ELECTRON_RUN_AS_NODE: これが残っていると Electron が素の Node として起動し
+  #   無言で即終了する（VSCode 拡張配下のシェルに多い）。
+  # - --appimage-extract-and-run: libfuse2 が無い環境（WSL 等）でも動かすため。
+  # - setsid: ランチャーと Electron 子プロセスをまとめて kill できるようにする。
+  setsid env -u ELECTRON_RUN_AS_NODE "$appimage" --appimage-extract-and-run >"$log" 2>&1 &
+  pid=$!
+
+  # --appimage-extract-and-run は起動前に全展開（190MB 超）するため、遅いディスク
+  # （/mnt の 9p 等）も考えて長めに待つ。プロセスが先に死んだら即打ち切る。
+  port=""
+  for _ in $(seq 1 60); do
+    port=$(grep -aoP 'serving .* at http://127\.0\.0\.1:\K[0-9]+' "$log" | head -1 || true)
+    [ -n "$port" ] && break
+    if ! kill -0 "$pid" 2>/dev/null; then break; fi
+    sleep 1
+  done
+
+  if [ -n "$port" ]; then
+    body=$(curl -fsS --max-time 10 "http://127.0.0.1:$port/index.html" 2>/dev/null || echo "")
+    if printf '%s' "$body" | grep -q '<html'; then
+      echo "  OK 内蔵サーバ応答 (port=$port, index.html に <html)"
+      if curl -fsS --max-time 10 -o /dev/null "http://127.0.0.1:$port/index.html?rx&obs" 2>/dev/null; then
+        echo "  OK rx ページ応答 (?rx&obs)"
+        rc=0
+      else
+        echo "エラー: rx ページ (?rx&obs) が応答しません。"
+      fi
+    else
+      echo "エラー: index.html の応答が不正です（<html が含まれない）。"
+    fi
+  else
+    echo "エラー: 起動ログに内蔵サーバの listen 行が現れませんでした。"
+    echo "  よくある原因: アプリが既に起動中（単一インスタンスロックで即終了）／"
+    echo "  ELECTRON_RUN_AS_NODE が環境に残っている／ディスプレイに接続できない。"
+    echo "  --- 起動ログ末尾 ---"
+    tail -5 "$log" | sed 's/^/  /'
+  fi
+
+  # プロセスグループごと停止し、--appimage-extract-and-run の展開物を片付ける。
+  kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+  sleep 1
+  extracted=$(grep -aom1 '/tmp/appimage_extracted_[0-9a-f]*' "$log" || true)
+  [ -n "$extracted" ] && rm -rf "$extracted"
+  rm -f "$log"
+  return "$rc"
+}
+
+# ── ビルド本体 ───────────────────────────────────────────────────────────────
+build() {
+  local target="$1"
+  command -v node >/dev/null 2>&1 || { echo "エラー: node が必要です"; exit 1; }
+
+  local VERSION SETUP_EXE PORTABLE_EXE APPIMAGE
+  VERSION="$(node -p "require('./package.json').version")"
+  SETUP_EXE="dist-electron/GuruguruAvatar-Setup-${VERSION}.exe"
+  PORTABLE_EXE="dist-electron/GuruguruAvatar-${VERSION}-portable.exe"
+  APPIMAGE="dist-electron/GuruguruAvatar-${VERSION}-linux-x86_64.AppImage"
+  echo "[info] version=$VERSION target=$target"
+
+  case "$target" in
+    win)   require_wine; npm run dist:win ;;
+    linux) npm run dist:linux ;;
+    all)   require_wine; npm run dist:app ;;
+  esac
+
+  echo "== 成果物の検証 =="
+  if [ "$target" != "linux" ]; then
+    check_artifact "$SETUP_EXE"
+    check_artifact "$PORTABLE_EXE"
+  fi
+  if [ "$target" != "win" ]; then
+    check_artifact "$APPIMAGE"
+    smoke_appimage "$APPIMAGE"
+  fi
+
+  echo "✓ ビルド完了（dist-electron/ に出力）"
+}
+
+TARGET="${1:-all}"
+case "$TARGET" in
+  -h|--help|help) usage ;;
+  all|win|linux)  build "$TARGET" ;;
+  smoke)
+    [ -n "${2:-}" ] || { echo "エラー: smoke には AppImage のパスを指定してください。"; echo; usage; exit 2; }
+    APPIMAGE_ARG="$2"
+    case "$APPIMAGE_ARG" in /*) ;; *) APPIMAGE_ARG="$ORIG_PWD/$APPIMAGE_ARG" ;; esac
+    smoke_appimage "$APPIMAGE_ARG"
+    ;;
+  *) echo "不明な引数: $1"; echo; usage; exit 2 ;;
+esac

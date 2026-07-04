@@ -1,8 +1,11 @@
-# Windows アプリ（.exe）にする（Electron + electron-builder）
+# デスクトップアプリにする（Electron + electron-builder・Windows / Linux）
 
-スマホ(tx)＋PC(rx)の「PC 側」を 1 つの Windows アプリにまとめて配る方法。Electron で
+スマホ(tx)＋PC(rx)の「PC 側」を 1 つのデスクトップアプリにまとめて配る方法。Electron で
 内蔵 HTTP サーバ（中継 + 静的配信）を起動し、ウィンドウに既存の `index.html?tx` を開く。
-配布先には Node.js も Bun も不要。`.exe`（インストーラ or ポータブル）をダブルクリックするだけ。
+配布先には Node.js も Bun も不要。Windows は `.exe`（インストーラ or ポータブル）、
+Linux は AppImage を起動するだけ。macOS 向けは配布しない（electron-builder の制約で
+ビルドは macOS 実機でしかできず、実機テストも署名・公証もできないため。
+Web 版 か `npm run build:local && npm start` を案内する）。
 
 `53-単体EXEにする.md` の Bun バイナリ版は「中継サーバだけ」を配るのに対し、こちらは
 **カメラ UI 付きのアプリ窓ごと**配る。OBS は同一機の透過 URL を見るだけでよい。
@@ -30,6 +33,8 @@ Electron 化は「配布先にランタイムを入れずにアプリとして�
   `npm run build:local` を内部で呼ぶので、手動ビルドは不要。
 - アイコン `build/icon.ico` を 1 度だけ生成しておく（後述）。`build/` は
   electron-builder の `buildResources` ディレクトリでもある。
+- Linux（AppImage）ターゲットは wine 不要。アイコンは `build/icon.png`
+  （`public/pwa-512x512.png` のコピー）を使う。
 
 ## package.json への追加
 
@@ -72,9 +77,12 @@ magick public/pwa-512x512.png -background none \
 `guruguru-avatar/` で次のいずれか。各スクリプトが先に `npm run build:local` を走らせる。
 
 ```bash
+./doBuild.sh              # Windows + Linux 全部（サイズゲート＋AppImage 起動スモーク付き）
+npm run dist:app          # Windows + Linux 全部（electron-builder 直呼び）
 npm run dist:win          # NSIS インストーラ + ポータブルの両方
 npm run dist:win:nsis     # NSIS インストーラだけ
 npm run dist:win:portable # ポータブル .exe だけ
+npm run dist:linux        # Linux AppImage だけ（wine 不要）
 ```
 
 初回は `npm install` で `electron` と `electron-builder` を入れておく。
@@ -85,6 +93,8 @@ npm run dist:win:portable # ポータブル .exe だけ
   デスクトップショートカット作成）
 - `GuruguruAvatar-<version>-portable.exe` … ポータブル（インストール不要・単体起動。
   `%TEMP%\guruguru-avatar-portable` へ自己展開して起動する）
+- `GuruguruAvatar-<version>-linux-x86_64.AppImage` … Linux 用単体アプリ
+  （`executableName` は `guruguru-avatar`。ユーザーデータは `~/.config/Guruguru Avatar/`）
 - `latest.yml` / `*.blockmap` … electron-updater 用のメタファイル。自動更新は
   使わないためリリースには載せない。
 
@@ -136,7 +146,14 @@ tailscale serve --bg --https=443 http://127.0.0.1:5179
   「詳細情報」→「実行」で起動できる（社内 / 個人配布なら通常これで十分）。
 - **getUserMedia**: アプリは内蔵サーバの自オリジン（`http://127.0.0.1:5179`）にだけ
   カメラ / マイク許可を出す。`file://` では secure context にならないため内蔵 HTTP を使う。
-- **更新時**: コードや配信物を変えたら `npm run dist:win` を再実行して `dist-electron/`
-  を作り直す。`dist-local/` も `build:local` で更新される。
+- **更新時**: コードや配信物を変えたら `./doBuild.sh`（または `npm run dist:*`）を再実行して
+  `dist-electron/` を作り直す。`dist-local/` も `build:local` で更新される。
 - **単一インスタンス**: 2 個目を起動しても既存ウィンドウが前面化するだけ（ポート二重
   bind を防ぐ）。
+- **Linux（AppImage）の実行**: libfuse2 が無い環境（Ubuntu 22.04+ / WSL 等）では
+  「AppImages require FUSE」で起動できない。`--appimage-extract-and-run` を付けて実行するか
+  `libfuse2` を導入する。起動確認は WSL2/WSLg のみ。
+- **ELECTRON_RUN_AS_NODE の罠**: この環境変数が残っていると（VSCode 拡張配下のシェルに
+  多い）、Electron が素の Node.js として起動し**無言で即終了**する。`doBuild.sh` の
+  スモークテストは `env -u ELECTRON_RUN_AS_NODE` で回避している。手動起動で
+  「何も起きない」ときはまずこれを疑う。

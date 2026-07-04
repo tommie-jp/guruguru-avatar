@@ -49,7 +49,10 @@ npm run relay            # standalone WS 中継サーバ単体起動 (server/rel
 - `predev` / `prebuild` フックで `scripts/copy-mediapipe-assets.mjs` が走り、MediaPipe の
   wasm/モデルを `public/` へコピーする（手動なら `npm run setup:mediapipe`）。
 - `npm run build:relay`（`:win` / `:linux` / `:macos`）は bun で中継サーバを単体実行ファイルに
-  コンパイルし `dist-exe/` へ出力する。
+  コンパイルし `dist-exe/` へ出力する（開発・特殊用途。配布は Electron に一本化済み）。
+- `npm run dist:win`（NSIS+portable）/ `dist:linux`（AppImage）/ `dist:app`（両方）は
+  electron-builder でデスクトップアプリを `dist-electron/` へ出力する。macOS 向けは
+  配布しない（Web 版 か `npm start` を案内）。
 
 ### 補助スクリプト（`do*.sh`）
 
@@ -59,7 +62,7 @@ npm run relay            # standalone WS 中継サーバ単体起動 (server/rel
 | --- | --- |
 | `doStartDev.sh` | vite dev(5173) を起動。残プロセスでポートが埋まっていたら先に解放する |
 | `doTest.sh` | テストを実行する（Vitest） |
-| `doBuild.sh` | リレイサーバ（中継＋静的配信の単体実行ファイル）の配布 zip を「ビルドするだけ」 |
+| `doBuild.sh` | Electron アプリ（Windows NSIS+portable / Linux AppImage）を「ビルドするだけ」。AppImage 起動スモーク付き |
 | `doDeploy.sh` | デプロイ/リリースのエントリポイント |
 | `doServer.sh` | standalone・別マシン用の WS 中継サーバ（`server/relay.mjs`, 既定 :8787）を起動 |
 | `doAvatarConfig.sh` | `assets/<id>/config.js`（`AVATAR_DEFS` 用オブジェクトリテラル）を生成 |

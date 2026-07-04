@@ -1,12 +1,13 @@
-# Windows アプリの使い方（OBS向け）
+# デスクトップアプリの使い方（OBS向け・Windows / Linux）
 
-OBS で「ぐるぐるアバター」を透過オーバーレイ表示するための、Windows 用アプリ
+OBS で「ぐるぐるアバター」を透過オーバーレイ表示するための、デスクトップアプリ
 （Electron・WS 中継サーバ内蔵）の使い方。ランタイムは同梱されているので、
 **Node も Bun もインストール不要**。すべて `localhost` で動くので TLS も
 ファイアウォール開放も要らない（スマホをカメラにする場合のみ Tailscale を使う）。
 
 - ダウンロード: [リリースページ](https://github.com/tommie-jp/guruguru-avatar/releases/latest)
-- 実行確認は Windows 11 でのみ行っています。
+- 実行確認は Windows 11 のみ。Linux（AppImage）は WSL2/WSLg での起動確認のみ。
+- macOS 向けバイナリは配布していません（「[macOS で使う](#macos-で使う配布物なし)」参照）。
 
 > 旧 zip 配布（`guruguru-relay.exe` + `start.bat`、win-v1.9.x 以前）から移行する場合は、
 > 末尾の「[旧 zip からの移行](#旧-zip-からの移行)」を参照。
@@ -44,8 +45,9 @@ RELAY ..> RX : ページ配信\nhttp://127.0.0.1:5179/index.html?rx&obs
 
 | ファイル | 形式 |
 | --- | --- |
-| `GuruguruAvatar-Setup-<version>.exe` | インストーラ（デスクトップショートカット作成・アンインストーラ付き） |
-| `GuruguruAvatar-<version>-portable.exe` | インストール不要の単体 exe（起動するだけ） |
+| `GuruguruAvatar-Setup-<version>.exe` | Windows インストーラ（デスクトップショートカット作成・アンインストーラ付き） |
+| `GuruguruAvatar-<version>-portable.exe` | Windows インストール不要の単体 exe（起動するだけ） |
+| `GuruguruAvatar-<version>-linux-x86_64.AppImage` | Linux 用の単体アプリ（x86_64。「[Linux で使う](#linux-で使うappimage)」参照） |
 
 1. exe を実行する。初回に **SmartScreen**（発行元不明）が出たら
    ［詳細情報］→［実行］（コード署名をしていないため。個人配布なら通常これで十分）。
@@ -73,6 +75,43 @@ RELAY ..> RX : ページ配信\nhttp://127.0.0.1:5179/index.html?rx&obs
 - アプリ窓で顔を振る・口を開けると OBS の rx が同調する。
 - 見た目の調整（影の濃さ・口・ズーム等）はアプリ窓で **`T` キー** → Tweaks パネル。
   変更した設定は rx(OBS) に同期される。
+
+## Linux で使う（AppImage）
+
+`GuruguruAvatar-<version>-linux-x86_64.AppImage` は Linux 用の単体アプリ。使い方は
+Windows と同じ（アプリ窓＝tx、OBS のブラウザソースに
+`http://127.0.0.1:5179/index.html?rx&obs`）。
+
+```bash
+chmod +x GuruguruAvatar-<version>-linux-x86_64.AppImage
+./GuruguruAvatar-<version>-linux-x86_64.AppImage
+```
+
+- **「AppImages require FUSE」と出る場合**（Ubuntu 22.04+ など libfuse2 が無い環境）は、
+  `--appimage-extract-and-run` を付けて実行するか、`sudo apt install libfuse2` を先に行う。
+- 起動確認は WSL2/WSLg（ビルド機）でのみ行っている。実 Linux デスクトップでの
+  動作報告・不具合は issue へ。
+- ユーザーデータは `~/.config/Guruguru Avatar/` に保存される。
+
+## macOS で使う（配布物なし）
+
+macOS 向けバイナリは配布していない。electron-builder の制約で macOS 向けビルドは
+macOS 実機でしかできず、実機での動作確認も署名・公証（Gatekeeper 対策）もできないため。
+代わりに次のどちらかを使う。
+
+- **Web 版**: [https://tommie-jp.github.io/guruguru-avatar/](https://tommie-jp.github.io/guruguru-avatar/)
+  （ブラウザだけで動く。OBS 連携なしのカメラ同調はこれで十分）
+- **ソースから実行**（OBS 連携・WS 中継が必要な場合）:
+
+  ```bash
+  git clone https://github.com/tommie-jp/guruguru-avatar.git
+  cd guruguru-avatar
+  npm install
+  npm run build:local && npm start   # 127.0.0.1:8787 で配信＋中継
+  ```
+
+  ブラウザで `http://127.0.0.1:8787/?tx` を開き、OBS のブラウザソースには
+  `http://127.0.0.1:8787/?rx&obs` を入れる（Node 実行なので Gatekeeper の許可作業も不要）。
 
 ## スマホをカメラにする（任意）
 
@@ -109,8 +148,9 @@ win-v1.9.x 以前の zip（`guruguru-relay.exe` + `start.bat`）から移行す�
 - tx はブラウザではなく**アプリの窓**になる（既定ブラウザは開かない）。
 - 旧 zip はそのまま使い続けても動く（最終版は
   [win-v1.9.3](https://github.com/tommie-jp/guruguru-avatar/releases/tag/win-v1.9.3) のアセット）。
-- Linux / macOS では、ソースから `npm run build:local && npm start`（`127.0.0.1:8787`）で
-  同等の構成になる（[14-Windowsで動かす.md](14-Windowsで動かす.md) の手順の要点は OS 共通）。
+- Linux は AppImage（「[Linux で使う](#linux-で使うappimage)」）へ移行する。macOS は
+  「[macOS で使う](#macos-で使う配布物なし)」のとおり Web 版 か `npm start` を使う
+  （[14-Windowsで動かす.md](14-Windowsで動かす.md) の手順の要点は OS 共通）。
 
 ## もっと詳しく
 

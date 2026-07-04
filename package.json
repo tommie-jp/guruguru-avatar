@@ -1,7 +1,8 @@
 {
   "name": "guruguru-avatar",
   "private": true,
-  "version": "1.10.0",
+  "version": "1.10.1",
+  "description": "Webカメラの顔の動きに同調する配信向けアバター（OBS 透過オーバーレイ対応）",
   "type": "module",
   "main": "electron/main.mjs",
   "scripts": {
@@ -15,6 +16,8 @@
     "dist:win": "cross-env VITE_NO_PWA=1 npm run build:local && electron-builder --win",
     "dist:win:nsis": "cross-env VITE_NO_PWA=1 npm run build:local && electron-builder --win nsis",
     "dist:win:portable": "cross-env VITE_NO_PWA=1 npm run build:local && electron-builder --win portable",
+    "dist:linux": "cross-env VITE_NO_PWA=1 npm run build:local && electron-builder --linux",
+    "dist:app": "cross-env VITE_NO_PWA=1 npm run build:local && electron-builder --win --linux",
     "build:relay": "npm run build:relay:win && npm run build:relay:linux && npm run build:relay:macos",
     "build:relay:win": "bun build --compile --minify --target=bun-windows-x64 server/relay.mjs --outfile dist-exe/guruguru-relay.exe",
     "build:relay:linux": "bun build --compile --minify --target=bun-linux-x64 server/relay.mjs --outfile dist-exe/guruguru-relay-linux-x64",
@@ -108,6 +111,15 @@
     "portable": {
       "artifactName": "GuruguruAvatar-${version}-portable.exe",
       "unpackDirName": "guruguru-avatar-portable"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "build/icon.png",
+      "category": "AudioVideo",
+      "executableName": "guruguru-avatar",
+      "artifactName": "GuruguruAvatar-${version}-linux-x86_64.AppImage"
     }
   }
 }

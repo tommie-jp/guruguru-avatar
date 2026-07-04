@@ -30,7 +30,7 @@ Webカメラで顔の向き・口の動きに同調する、配信向けブラ�
 - 📡 **WS 中継（tx/rx）** — スマホや別ブラウザで推論した動きを OBS 側へ送信（`?tx` / `?rx`）
 - 🔊 **サウンドボード＆演出** — 効果音・スタンプ・ジェスチャー（回転／うなずく／No ほか）をワンタップで発火、配信側にも同期
 - ✍️ **お絵かきオーバーレイ** — 配信画面に手描きできる（rx へライブ同期）
-- 📱 **PWA / 🪟 Windows アプリ** — ホーム画面に追加（PWA）、Node 不要の単体 exe（Electron）
+- 📱 **PWA / 🖥 デスクトップアプリ** — ホーム画面に追加（PWA）、Node 不要の単体アプリ（Electron・Windows exe / Linux AppImage）
 - 🗣 **複数モード同梱** — マイク音量で動くトーク版、マウス追従のぐるぐる版、手・ポーズ可視化のトラッキング版
 
 > フォーク元の [rotejin/tomari-guruguru](https://github.com/rotejin/tomari-guruguru)（マウス追従＋口パク）を、
@@ -80,7 +80,10 @@ npm run dev
 - 影の濃さは Tweaks パネルの「影の濃さ」(0〜6) で調整（旧 `?shadow=N` は廃止）
 - ステージモード中は **`T` キー**で Tweaks パネルを開閉
 - 手順の詳細は [docs-camera/10-OBSでライブ配信.md](docs-camera/10-OBSでライブ配信.md)
-- Node 不要の Windows アプリ（exe）で使う場合は [docs-camera/12-Windowsアプリの使い方.md](docs-camera/12-Windowsアプリの使い方.md)（ビルド方法は [docs-camera/58-WindowsアプリにするElectron.md](docs-camera/58-WindowsアプリにするElectron.md)）
+- Node 不要のデスクトップアプリ（Windows exe / Linux AppImage）で使う場合は
+  [docs-camera/12-Windowsアプリの使い方.md](docs-camera/12-Windowsアプリの使い方.md)
+  （ビルド方法は [docs-camera/58-WindowsアプリにするElectron.md](docs-camera/58-WindowsアプリにするElectron.md)）。
+  macOS 向けバイナリは配布していません（Web 版 か、ソースから `npm run build:local && npm start` を使用）
 
 OBS で使う場合は、Tweaks の背景色をクロマキーしやすい色に調整するのも有効です。
 
@@ -180,7 +183,7 @@ http://127.0.0.1:4173/guruguru-avatar/
 - **fabric.js** — お絵かきオーバーレイ
 - **ws** — WS 中継サーバ（`server/relay.mjs`）
 - **vite-plugin-pwa** — PWA（ホーム画面追加）
-- **Electron** — Windows 単体アプリ（中継内蔵）
+- **Electron** — デスクトップアプリ（Windows exe / Linux AppImage・中継内蔵）
 - **Vitest** — ユニットテスト
 
 ---
@@ -216,7 +219,7 @@ http://127.0.0.1:4173/guruguru-avatar/
 │   ├── use-tweaks.js       # Tweaks の状態管理
 │   └── character-config.js # アバター登録（AVATAR_DEFS）
 ├── server/                 # WS 中継（relay.mjs / relay-core.mjs・TLS プロキシ・静的配信）
-├── electron/               # Windows 単体アプリ（Electron・中継内蔵）
+├── electron/               # デスクトップアプリ（Electron・中継内蔵。Windows / Linux）
 ├── windows/                # Windows 用の起動 bat・リリーステスト
 ├── scripts/                # MediaPipe アセット配置／Pages 検証
 ├── public/
@@ -239,7 +242,8 @@ http://127.0.0.1:4173/guruguru-avatar/
 
 GitHub Pages で公開しています（base = `/guruguru-avatar/`）。push では自動デプロイされないため、
 `workflow_dispatch` を手動トリガーします。リポジトリ直下の `doDeploy.sh` が起動から完了監視・反映確認、
-Windows アプリ（Electron の NSIS インストーラ＋ポータブル exe）のリリースと実機 E2E までを行います（`pages` / `win` 指定可、既定は両方）。
+デスクトップアプリ（Windows: NSIS インストーラ＋ポータブル exe / Linux: AppImage）のリリースと
+公開後テストまでを行います（`pages` / `app` 指定可、既定は両方）。ビルドだけなら `doBuild.sh`。
 
 ```bash
 git push origin main
