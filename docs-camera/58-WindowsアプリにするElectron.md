@@ -153,7 +153,13 @@ tailscale serve --bg --https=443 http://127.0.0.1:5179
 - **Linux（AppImage）の実行**: libfuse2 が無い環境（Ubuntu 22.04+ / WSL 等）では
   「AppImages require FUSE」で起動できない。`--appimage-extract-and-run` を付けて実行するか
   libfuse2 を導入する（Ubuntu 24.04 以降はパッケージ名 `libfuse2t64`、22.04 は `libfuse2`）。
-  起動確認は WSL2/WSLg のみ。
+  `--appimage-extract`（`-and-run` なし）は展開するだけで起動しない点に注意
+  （展開後の `squashfs-root/AppRun` を実行すれば FUSE 無しで起動できる）。
+- **WSL では起動確認までしかできない**: WSL は `/dev/video` 未パススルーでカメラ不可、
+  WSLg は WebGL blocklist で PixiJS 描画不可。AppImage の smoke で確認できるのは
+  「窓が開き内蔵サーバが 5179 で応答する」ところまで。顔追従の実動作確認は実 Linux
+  デスクトップ（カメラ + GPU あり）か Windows 版で行う。`doBuild.sh` の AppImage
+  スモークもこの前提（HTTP 200 確認のみ）。
 - **ELECTRON_RUN_AS_NODE の罠**: この環境変数が残っていると（VSCode 拡張配下のシェルに
   多い）、Electron が素の Node.js として起動し**無言で即終了**する。`doBuild.sh` の
   スモークテストは `env -u ELECTRON_RUN_AS_NODE` で回避している。手動起動で

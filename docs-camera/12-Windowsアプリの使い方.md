@@ -88,11 +88,38 @@ chmod +x GuruguruAvatar-<version>-linux-x86_64.AppImage
 ```
 
 - **「AppImages require FUSE」と出る場合**（Ubuntu 22.04+ / WSL など libfuse2 が無い環境）は、
-  `--appimage-extract-and-run` を付けて実行するか、先に libfuse2 を導入する
-  （Ubuntu 24.04 以降: `sudo apt install libfuse2t64` ／ 22.04: `sudo apt install libfuse2`）。
-- 起動確認は WSL2/WSLg（ビルド機）でのみ行っている。実 Linux デスクトップでの
-  動作報告・不具合は issue へ。
+  次のどちらか:
+  - `--appimage-extract-and-run` を付けて実行する（sudo 不要・その場で動く）:
+
+    ```bash
+    ./GuruguruAvatar-<version>-linux-x86_64.AppImage --appimage-extract-and-run
+    ```
+
+  - もしくは先に libfuse2 を導入して、以後は直接実行できるようにする
+    （Ubuntu 24.04 以降: `sudo apt install libfuse2t64` ／ 22.04: `sudo apt install libfuse2`）。
+- **`--appimage-extract`（`-and-run` なし）は「展開するだけ」で起動はしない**。
+  展開後に出る `squashfs-root/AppRun` を実行すれば、FUSE 無しでも起動できる:
+
+  ```bash
+  ./GuruguruAvatar-<version>-linux-x86_64.AppImage --appimage-extract  # squashfs-root/ に展開
+  ./squashfs-root/AppRun                                               # これで起動
+  ```
+
 - ユーザーデータは `~/.config/Guruguru Avatar/` に保存される。
+
+### WSL では起動確認までしかできない（重要）
+
+**AppImage の動作確認は WSL2/WSLg（ビルド機）でのみ行っており、WSL では実アバターは
+まともに動かない**。上の手順で確認できるのは「アプリ窓が開き、内蔵サーバが
+`127.0.0.1:5179` で応答する」ところまで。理由は 2 つ:
+
+- **カメラが使えない** … WSL は `/dev/video` をパススルーしないため getUserMedia が失敗し、
+  顔追従が動かない。
+- **PixiJS が描画できない** … WSLg では WebGL が blocklist され、アバターのスプライトが出ない。
+
+顔追従まで実際に試すなら、カメラと GPU が使える**実 Linux デスクトップ**で動かす
+（そこはまだ未検証。動作報告・不具合は issue へ）。手元の Windows で試すだけなら
+Windows 版 exe の方が確実（[1. ダウンロードして起動する](#1-ダウンロードして起動する)）。
 
 ## macOS で使う（配布物なし）
 
