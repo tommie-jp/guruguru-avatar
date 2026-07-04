@@ -155,11 +155,13 @@ tailscale serve --bg --https=443 http://127.0.0.1:5179
   libfuse2 を導入する（Ubuntu 24.04 以降はパッケージ名 `libfuse2t64`、22.04 は `libfuse2`）。
   `--appimage-extract`（`-and-run` なし）は展開するだけで起動しない点に注意
   （展開後の `squashfs-root/AppRun` を実行すれば FUSE 無しで起動できる）。
-- **WSL では起動確認までしかできない**: WSL は `/dev/video` 未パススルーでカメラ不可、
-  WSLg は WebGL blocklist で PixiJS 描画不可。AppImage の smoke で確認できるのは
-  「窓が開き内蔵サーバが 5179 で応答する」ところまで。顔追従の実動作確認は実 Linux
-  デスクトップ（カメラ + GPU あり）か Windows 版で行う。`doBuild.sh` の AppImage
-  スモークもこの前提（HTTP 200 確認のみ）。
+- **WSL2/WSLg での動作（実測）**: AppImage は起動・描画し、**マウス追従（ぐるぐる版＝`<img>`
+  切り替え・WebGL 不要）は WSLg で動作、Windows OBS(rx) も正しく透過描画**を確認済み。
+  WSL 特有の制約は 2 点だけ: ①PC カメラは `/dev/video` 未パススルーで getUserMedia 不可
+  （usbipd 共有かスマホ tx で回避）、②アプリ窓のカメラ版プレビュー（PixiJS）は WSLg の
+  WebGL blocklist で出ないことがある（OBS 側 rx は Windows GPU で描くので実配信には影響なし）。
+  `doBuild.sh` の AppImage スモークは HTTP 200 確認のみ（描画までは見ない）。実 Linux
+  デスクトップでの通し確認は未実施。
 - **ELECTRON_RUN_AS_NODE の罠**: この環境変数が残っていると（VSCode 拡張配下のシェルに
   多い）、Electron が素の Node.js として起動し**無言で即終了**する。`doBuild.sh` の
   スモークテストは `env -u ELECTRON_RUN_AS_NODE` で回避している。手動起動で
