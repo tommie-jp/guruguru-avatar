@@ -58,6 +58,10 @@ export default function forkConfig({ command, mode }) {
   );
   const isBuild = command === 'build';
 
+  // ビルド情報（define の静的置換と version.json 出力で共有する）。
+  const buildSha = isBuild ? gitShortSha() : 'dev';
+  const buildDate = isBuild ? new Date().toISOString().slice(0, 10) : 'dev';
+
   // dev/preview サーバの固定ポート（strictPort）。下の server.port と公開オリジンで共有。
   const DEV_PORT = 5173;
 
@@ -88,7 +92,11 @@ export default function forkConfig({ command, mode }) {
       relayWsPlugin({ expose: env.RELAY_EXPOSE === '1' }),
       // index.html（カメラ版）をインストール可能な PWA にする。manifest / Service Worker /
       // 登録スクリプトを Vite ビルドに同梱する。WS 中継には介在しない（navigateFallback:null）。
-      VitePWA({
+      //
+      // Electron 配布ビルド（VITE_NO_PWA=1、dist:win 系が設定）では PWA を丸ごと外す:
+      // 内蔵サーバはローカルディスク配信なので SW キャッシュに利点が無く、CacheFirst(30日)が
+      // アプリ更新後も旧アセットを見せ続ける害だけが残る（OBS CEF に入った SW は剥がしにくい）。
+      ...(env.VITE_NO_PWA === '1' ? [] : [VitePWA({
         registerType: 'autoUpdate', // 新版は次回読込で静かに有効化（配信中にトーストを出さない）
         filename: 'sw.js',
         injectRegister: 'auto', // 各 HTML の <head> に登録スクリプトを注入（アプリ側コード不要）
@@ -164,15 +172,26 @@ export default function forkConfig({ command, mode }) {
         },
         // dev では SW を無効（必要なら true にして devOptions で検証）。
         devOptions: { enabled: false, type: 'module' },
-      }),
+      })]),
+      // 配布物の同一性検証用マーカー。リリース E2E（windows/test-release-win11.ps1）が
+      // GET /version.json でリリースタグとビルドの一致を確認する。
+      {
+        name: 'guruguru-version-json',
+        apply: 'build',
+        generateBundle() {
+          this.emitFile({
+            type: 'asset',
+            fileName: 'version.json',
+            source: JSON.stringify({ version: pkg.version, sha: buildSha, date: buildDate }),
+          });
+        },
+      },
     ],
     // ビルド時に静的置換される定数。camera-app.jsx などから参照する。
     define: {
       __APP_VERSION__: JSON.stringify(pkg.version),
-      __GIT_SHA__: JSON.stringify(isBuild ? gitShortSha() : 'dev'),
-      __BUILD_DATE__: JSON.stringify(
-        isBuild ? new Date().toISOString().slice(0, 10) : 'dev',
-      ),
+      __GIT_SHA__: JSON.stringify(buildSha),
+      __BUILD_DATE__: JSON.stringify(buildDate),
       __TX_PUBLIC_ORIGIN__: JSON.stringify(txPublicOrigin),
     },
     // fork: GitHub Pages のリポジトリ名（guruguru-avatar）に追従させる base。

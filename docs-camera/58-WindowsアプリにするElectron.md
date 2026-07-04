@@ -13,7 +13,19 @@ Electron 化は「配布先にランタイムを入れずにアプリとして�
 ## 前提
 
 - ビルドは **Windows でも WSL でも**できる（electron-builder が NSIS / portable を生成）。
+  ただし **WSL/Linux では wine が必須**（NSIS のアンインストーラ抽出にインストーラスタブを
+  wine で実行するため。回避設定は無い。portable だけなら wine 不要）:
+
+  ```bash
+  sudo dpkg --add-architecture i386 && sudo apt-get update
+  sudo apt-get install wine wine32:i386
+  ```
+
 - Node.js は 20.19+ または 22.12+（22 LTS 推奨）。
+- `dist:win` 系スクリプトは `VITE_NO_PWA=1` で `build:local` を実行するため、
+  **配布物に PWA（Service Worker / manifest）は入らない**。内蔵サーバはローカル配信で
+  SW キャッシュの利点が無く、更新後も旧アセットが最長 30 日残る害だけがあるため
+  （GitHub Pages 版の PWA は従来どおり SW 込み）。
 - 先に `dist-local/`（base=/ の配信物）を作る。`dist:win*` スクリプトが
   `npm run build:local` を内部で呼ぶので、手動ビルドは不要。
 - アイコン `build/icon.ico` を 1 度だけ生成しておく（後述）。`build/` は
@@ -66,11 +78,15 @@ npm run dist:win:portable # ポータブル .exe だけ
 ```
 
 初回は `npm install` で `electron` と `electron-builder` を入れておく。
-出力は `dist-electron/` に揃う。
+出力は `dist-electron/` に揃う（アセット名は GitHub Releases の空白→ドット置換を
+避けるため空白なしにしている）。
 
-- `Guruguru Avatar Setup <version>.exe` … NSIS インストーラ（インストール先変更可・
+- `GuruguruAvatar-Setup-<version>.exe` … NSIS インストーラ（インストール先変更可・
   デスクトップショートカット作成）
-- `Guruguru Avatar-<version>-portable.exe` … ポータブル（インストール不要・単体起動）
+- `GuruguruAvatar-<version>-portable.exe` … ポータブル（インストール不要・単体起動。
+  `%TEMP%\guruguru-avatar-portable` へ自己展開して起動する）
+- `latest.yml` / `*.blockmap` … electron-updater 用のメタファイル。自動更新は
+  使わないためリリースには載せない。
 
 ## 起動と接続
 

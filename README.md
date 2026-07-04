@@ -80,7 +80,7 @@ npm run dev
 - 影の濃さは Tweaks パネルの「影の濃さ」(0〜6) で調整（旧 `?shadow=N` は廃止）
 - ステージモード中は **`T` キー**で Tweaks パネルを開閉
 - 手順の詳細は [docs-camera/10-OBSでライブ配信.md](docs-camera/10-OBSでライブ配信.md)
-- Node 不要の単体 `.exe` にしたい場合は [docs-camera/14-Windowsで動かす.md](docs-camera/14-Windowsで動かす.md)・[docs-camera/58-WindowsアプリにするElectron.md](docs-camera/58-WindowsアプリにするElectron.md)
+- Node 不要の Windows アプリ（exe）で使う場合は [docs-camera/12-Windowsアプリの使い方.md](docs-camera/12-Windowsアプリの使い方.md)（ビルド方法は [docs-camera/58-WindowsアプリにするElectron.md](docs-camera/58-WindowsアプリにするElectron.md)）
 
 OBS で使う場合は、Tweaks の背景色をクロマキーしやすい色に調整するのも有効です。
 
@@ -239,7 +239,7 @@ http://127.0.0.1:4173/guruguru-avatar/
 
 GitHub Pages で公開しています（base = `/guruguru-avatar/`）。push では自動デプロイされないため、
 `workflow_dispatch` を手動トリガーします。リポジトリ直下の `doDeploy.sh` が起動から完了監視・反映確認、
-Windows 向け zip のリリースまでを行います（`pages` / `win` 指定可、既定は両方）。
+Windows アプリ（Electron の NSIS インストーラ＋ポータブル exe）のリリースと実機 E2E までを行います（`pages` / `win` 指定可、既定は両方）。
 
 ```bash
 git push origin main

@@ -1,0 +1,120 @@
+# Windows アプリの使い方（OBS向け）
+
+OBS で「ぐるぐるアバター」を透過オーバーレイ表示するための、Windows 用アプリ
+（Electron・WS 中継サーバ内蔵）の使い方。ランタイムは同梱されているので、
+**Node も Bun もインストール不要**。すべて `localhost` で動くので TLS も
+ファイアウォール開放も要らない（スマホをカメラにする場合のみ Tailscale を使う）。
+
+- ダウンロード: [リリースページ](https://github.com/tommie-jp/guruguru-avatar/releases/latest)
+- 実行確認は Windows 11 でのみ行っています。
+
+> 旧 zip 配布（`guruguru-relay.exe` + `start.bat`、win-v1.9.x 以前）から移行する場合は、
+> 末尾の「[旧 zip からの移行](#旧-zip-からの移行)」を参照。
+
+## しくみ（ざっくり）
+
+- **送信側 tx** … アプリの窓そのもの。カメラと顔推論を動かす（感度・口・影などの設定 UI もここ）。
+- **受信側 rx** … OBS のブラウザソース（＝**CEF**＝OBS 内蔵ブラウザ）。カメラは使わず、tx の動きで描画するだけ。
+- **中継サーバ** … アプリに内蔵。tx の動きを rx へ中継し、同じポートでページも配る（`127.0.0.1:5179`）。
+
+OBS 側(rx)はカメラを使わないので、**OBS に `--enable-media-stream` を付ける必要はない**。
+
+```plantuml
+@startuml
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam defaultTextAlignment center
+
+node "Windows 11 PC（すべて localhost で完結）" {
+  [Guruguru Avatar（アプリ窓）\n送信側 tx\nカメラ＋顔推論＋設定UI] as APP
+  [内蔵中継サーバ\n127.0.0.1:5179] as RELAY
+  [受信側 rx\n(OBS ブラウザソース)\n受信して描画するだけ] as RX
+}
+
+APP -right-> RELAY : 動き(state/config)\nws://127.0.0.1:5179
+RELAY -right-> RX : tx の動きを中継
+RELAY ..> RX : ページ配信\nhttp://127.0.0.1:5179/index.html?rx&obs
+@enduml
+```
+
+## 1. ダウンロードして起動する
+
+[リリースページ](https://github.com/tommie-jp/guruguru-avatar/releases/latest)からどちらか
+一方をダウンロードする。
+
+| ファイル | 形式 |
+| --- | --- |
+| `GuruguruAvatar-Setup-<version>.exe` | インストーラ（デスクトップショートカット作成・アンインストーラ付き） |
+| `GuruguruAvatar-<version>-portable.exe` | インストール不要の単体 exe（起動するだけ） |
+
+1. exe を実行する。初回に **SmartScreen**（発行元不明）が出たら
+   ［詳細情報］→［実行］（コード署名をしていないため。個人配布なら通常これで十分）。
+2. アプリの窓が開き、送信側 tx（カメラ画面）になる。**カメラを許可**して顔を動かすと
+   アバターが追従する。
+3. インストーラ版のインストール先は `%LOCALAPPDATA%\Programs\Guruguru Avatar\`（ユーザー単位）。
+
+## 2. OBS に受信側(rx)を設定する
+
+1. OBS で「ソース」→「＋」→「**ブラウザ**」を追加する。
+2. 次のように設定する。
+
+   | 項目 | 値 |
+   | --- | --- |
+   | URL | `http://127.0.0.1:5179/index.html?rx&obs` |
+   | 幅 / 高さ | 配置したいサイズ（例 `1080` × `1080`） |
+   | ソースが非アクティブのときシャットダウン | OFF（接続を温存する） |
+
+3. `?rx&obs` は**背景透過＋UI 非表示**なので、そのままオーバーレイにできる。
+
+## 接続を確認する
+
+- アプリ窓の画面下に「**OBS接続中（1）**」が出れば結線 OK
+  （数字は接続中の OBS ブラウザソース数）。
+- アプリ窓で顔を振る・口を開けると OBS の rx が同調する。
+- 見た目の調整（影の濃さ・口・ズーム等）はアプリ窓で **`T` キー** → Tweaks パネル。
+  変更した設定は rx(OBS) に同期される。
+
+## スマホをカメラにする（任意）
+
+アプリ窓の「カメラ源トグル」で **PC カメラ / スマホ** を切り替えられる。スマホ(QR)にすると
+QR コードが前面に出て、同一 Tailscale ネットのスマホから読み取って tx にできる（HTTPS が
+必要なため Tailscale 前提）。セットアップ手順と動作確認チェックリストは
+[58-WindowsアプリにするElectron.md](58-WindowsアプリにするElectron.md) を、Tailscale の
+仕組みは [17-localhostとtailscaleを同時に使う.md](17-localhostとtailscaleを同時に使う.md) を参照。
+
+## 停止・アンインストール
+
+- 停止はアプリ窓を閉じるだけ。2 個目を起動しても既存の窓が前面化するだけ（単一インスタンス）。
+- インストーラ版のアンインストールは Windows の「設定 → アプリ」から（ショートカットも消える）。
+- ポータブル版は終了時に展開物（`%TEMP%\guruguru-avatar-portable`）を自動で片付ける。
+- 画面設定などのユーザーデータは `%APPDATA%\Guruguru Avatar` に残る（不要なら手動削除）。
+
+## つまずいたら
+
+- **OBS が真っ黒 / 動かない**: アプリ窓が「OBS接続中」になっているか確認。OBS のブラウザ
+  ソースを右クリック →「**キャッシュを更新**」で再読込する。
+- **カメラが出ない**: Windows 設定 → プライバシーとセキュリティ → カメラ の許可を確認。
+  他アプリがカメラを専有している場合は先に閉じる。
+- **ポート 5179 が使用中**: アプリは自動で別ポートに逃げる。実際のポートは**ウィンドウの
+  タイトルバー**（`Guruguru Avatar — :ポート番号`）に出るので、OBS の URL をその番号に
+  合わせる（恒久対処は 5179 を使っているプロセスを止めること）。
+- **タスクトレイ／タスクバーに残った気がする**: タスクマネージャで `Guruguru Avatar` を
+  終了する。
+
+## 旧 zip からの移行
+
+win-v1.9.x 以前の zip（`guruguru-relay.exe` + `start.bat`）から移行する場合:
+
+- **OBS の URL を変更する**: `http://localhost:8787/?rx` → `http://127.0.0.1:5179/index.html?rx&obs`
+- tx はブラウザではなく**アプリの窓**になる（既定ブラウザは開かない）。
+- 旧 zip はそのまま使い続けても動く（最終版は
+  [win-v1.9.3](https://github.com/tommie-jp/guruguru-avatar/releases/tag/win-v1.9.3) のアセット）。
+- Linux / macOS では、ソースから `npm run build:local && npm start`（`127.0.0.1:8787`）で
+  同等の構成になる（[14-Windowsで動かす.md](14-Windowsで動かす.md) の手順の要点は OS 共通）。
+
+## もっと詳しく
+
+- ソースからビルドして動かす（開発者向け）: [14-Windowsで動かす.md](14-Windowsで動かす.md)
+- アプリ（exe）のビルド方法: [58-WindowsアプリにするElectron.md](58-WindowsアプリにするElectron.md)
+- OBS にカメラ自体を触らせる構成: [10-OBSでライブ配信.md](10-OBSでライブ配信.md)
+- 公開済みリリースの自動テスト: [55-リリースの動作テスト.md](55-リリースの動作テスト.md)

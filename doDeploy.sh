@@ -2,10 +2,10 @@
 #
 # デプロイ/リリースのエントリポイント。
 #
-#   ./doDeploy.sh [all]     Pages デプロイ → Windows zip リリースの両方（既定）
+#   ./doDeploy.sh [all]     Pages デプロイ → Windows アプリ（Electron）リリースの両方（既定）
 #   ./doDeploy.sh pages     GitHub Pages へデプロイのみ
-#   ./doDeploy.sh win       リレイサーバを GitHub Release として配置のみ
-#                           （win/linux/macOS の zip をビルドして upload。実機テストは Windows）
+#   ./doDeploy.sh win       Windows アプリ（Electron）を GitHub Release として配置のみ
+#                           （NSIS インストーラ + ポータブル exe を upload。実機 E2E まで実行）
 #
 # 注意: gh は --repo 無指定だと upstream(rotejin) を見て 403 になるので必ず --repo を付ける。
 #
@@ -25,24 +25,29 @@ usage() {
 doDeploy.sh — デプロイ/リリースのエントリポイント
 
 使い方:
-  ./doDeploy.sh [all]      Pages デプロイ → Windows zip リリースの両方（既定・引数なしと同じ）
+  ./doDeploy.sh [all]      Pages デプロイ → Windows アプリリリースの両方（既定・引数なしと同じ）
   ./doDeploy.sh pages      GitHub Pages へデプロイのみ
-  ./doDeploy.sh win        Windows 版リレイサーバを GitHub Release として配置のみ
+  ./doDeploy.sh win        Windows アプリ（Electron）を GitHub Release として配置のみ
   ./doDeploy.sh -h|--help  このヘルプを表示
 
 サブコマンド:
   all     pages → win を続けて実行（既定）。途中で失敗したら止まる（set -e）。
   pages   origin/$BRANCH を対象に $WORKFLOW を workflow_dispatch で起動し、
           完了まで監視して $SITE_URL の反映を確認する。
-  win     ./doBuild.sh で win/linux/macOS の配布 zip を作り、tag 'win-v<version>' の
-          GitHub Release として upload する（既存リリースならアセットを --clobber で
-          上書き）。実機 E2E は Windows 版についてのみ行う。
+  win     npm run dist:win で NSIS インストーラ + ポータブル exe をビルドし、
+          tag 'win-v<version>' の GitHub Release として upload する（既存リリースなら
+          アセットを --clobber で上書き）。公開後に実機 E2E（Windows）まで実行する。
+
+前提:
+  win は wine が必要（Linux/WSL 上の NSIS ビルドでアンインストーラ抽出に使う）。
+  未導入なら: sudo dpkg --add-architecture i386 && sudo apt-get update &&
+              sudo apt-get install wine wine32:i386
 
 環境変数:
-  win のビルド設定（BUN = 使用する bun のパス）は ./doBuild.sh を参照。
+  DEPLOY_SKIP_WIN_TEST=1   リリース後の実機 E2E をスキップする
 
 関連:
-  ./doBuild.sh             zip をビルドするだけ（アップロードしない）
+  npm run dist:win         Electron 成果物をビルドするだけ（アップロードしない）
   対象リポジトリ           $REPO
 USAGE
 }
@@ -113,74 +118,110 @@ deploy_pages() {
   echo "✓ デプロイ完了: $SITE_URL"
 }
 
-# ── win: Windows 版リレイサーバを GitHub Release として配置 ───────────────
-# ビルドは ./doBuild.sh に委譲（zip 生成は一箇所に集約）。ここではその zip を
-# tag 'win-v<version>' の Release として upload するだけ。
+# ── win: Windows アプリ（Electron）を GitHub Release として配置 ────────────
+# ビルドは npm run dist:win（build:local を内包。VITE_NO_PWA=1 で SW を除外）。
+# 生成された NSIS インストーラとポータブル exe を tag 'win-v<version>' の Release へ
+# 同時添付でアップロードし、取得可能になるのを待って実機 E2E まで行う。
 release_windows() {
   require_gh
 
-  local VERSION TAG ZIP LINUX_ZIP MAC_ZIP notes
+  # Linux/WSL 上の NSIS ビルドはアンインストーラ抽出に wine が必須（回避設定なし）。
+  if ! command -v wine >/dev/null 2>&1; then
+    echo "エラー: wine が必要です（Linux/WSL 上の NSIS ビルドに使用）。"
+    echo "  → sudo dpkg --add-architecture i386 && sudo apt-get update \\"
+    echo "     && sudo apt-get install wine wine32:i386"
+    exit 1
+  fi
+
+  local VERSION TAG SETUP_EXE PORTABLE_EXE notes
   VERSION="$(node -p "require('./package.json').version")"
   TAG="win-v${VERSION}"
-  ZIP="dist-exe/guruguru-avatar-win-v${VERSION}.zip"
-  LINUX_ZIP="dist-exe/guruguru-avatar-linux-v${VERSION}.zip"
-  MAC_ZIP="dist-exe/guruguru-avatar-macos-v${VERSION}.zip"
+  SETUP_EXE="dist-electron/GuruguruAvatar-Setup-${VERSION}.exe"
+  PORTABLE_EXE="dist-electron/GuruguruAvatar-${VERSION}-portable.exe"
 
-  echo "== ビルド (./doBuild.sh) =="
-  ./doBuild.sh
-  [ -f "$ZIP" ] || { echo "エラー: zip が見つかりません: $ZIP"; exit 1; }
+  echo "== ビルド (npm run dist:win) =="
+  npm run dist:win
 
-  # アップロード対象（win は必須、linux/macOS は存在すれば同梱）。
-  local assets=("$ZIP")
-  [ -f "$LINUX_ZIP" ] && assets+=("$LINUX_ZIP")
-  [ -f "$MAC_ZIP" ] && assets+=("$MAC_ZIP")
+  # 成果物ゲート: バージョン付きの厳密名で存在＋サイズ(>100MB)を検証する。
+  # dist-electron には旧バージョンが残留しうるので glob では拾わない。壊れた NSIS
+  # スタブ（数百 KB）を公開してしまう事故をここで止める。
+  local f size
+  for f in "$SETUP_EXE" "$PORTABLE_EXE"; do
+    [ -f "$f" ] || { echo "エラー: 成果物が見つかりません: $f"; exit 1; }
+    size="$(stat -c%s "$f")"
+    if [ "$size" -lt $((100 * 1024 * 1024)) ]; then
+      echo "エラー: 成果物が小さすぎます（壊れたビルドの疑い）: $f (${size} bytes)"
+      exit 1
+    fi
+  done
+
+  # アップロード対象は 2 アセットのみ（latest.yml / .blockmap は自動更新を
+  # 使わないため配布しない）。
+  local assets=("$SETUP_EXE" "$PORTABLE_EXE")
 
   echo "== GitHub Release にアップロード (tag=$TAG, assets=${#assets[@]}) =="
   notes="$(cat <<NOTES
-OBS 用の tx/rx を動かすための、中継 + 静的配信の単体実行ファイルです（Node も Bun も不要・ランタイム同梱）。win / linux / macOS(arm64) を同梱。
+Windows 用アプリ（Electron）です。WS 中継サーバ内蔵・Node も Bun も不要。
+起動するだけで、Web カメラ（またはスマホ）の顔の動きに同調するアバターを
+OBS に透過オーバーレイ表示できます。実行確認は Windows 11 のみ。
 
-実行確認は Windows 11 でのみ行っています。
+アセット（どちらか一方でよい）:
+- GuruguruAvatar-Setup-${VERSION}.exe … インストーラ（デスクトップショートカット作成）
+- GuruguruAvatar-${VERSION}-portable.exe … インストール不要の単体 exe
 
 使い方:
-1. zip をローカルドライブに展開（例 C:\\guruguru）。zip 内から直接実行しない。
-2. start.bat をダブルクリック → 送信側(tx)が既定ブラウザで開く。
-3. OBS の「ブラウザ」ソースに http://localhost:8787/?rx 。
+1. exe をダウンロードして実行（「発行元不明」が出たら「詳細情報」→「実行」）。
+2. アプリ窓に送信側(tx)＝カメラ画面が開く。カメラを許可する。
+3. OBS の「ブラウザ」ソースに http://127.0.0.1:5179/index.html?rx&obs を入れる（背景透過）。
 
-使い方は [21-OBSリレイサーバの使い方](https://github.com/$REPO/blob/$BRANCH/docs-camera/21-OBSリレイサーバの使い方.md) を参照。
-開発者向けの詳細: [09-Windowsで動かす.md](https://github.com/$REPO/blob/$BRANCH/docs-camera/09-Windowsで動かす.md) / [10-単体EXEにする.md](https://github.com/$REPO/blob/$BRANCH/docs-camera/10-単体EXEにする.md)
+詳しくは [12-Windowsアプリの使い方](https://github.com/$REPO/blob/$BRANCH/docs-camera/12-Windowsアプリの使い方.md) を参照。
+
+---
+
+**旧 zip 配布（win-v1.9.x 以前）からの移行**
+
+- 本リリースから配布物は Electron アプリのみです（guruguru-relay.exe + start.bat の zip 配布は終了）。
+- OBS の URL はポートが変わります: \`http://localhost:8787/?rx\` → \`http://127.0.0.1:5179/index.html?rx&obs\`
+- 旧 zip はそのまま使い続けられます（最終版: [win-v1.9.3](https://github.com/$REPO/releases/tag/win-v1.9.3) のアセット）。
+- Linux / macOS 向け zip は廃止しました。ソースから \`npm run build:local && npm start\`（127.0.0.1:8787）で同等に動きます（[14-Windowsで動かす](https://github.com/$REPO/blob/$BRANCH/docs-camera/14-Windowsで動かす.md) 参照。手順の要点は OS 共通）。
+
+開発者向けのビルド手順: [58-WindowsアプリにするElectron](https://github.com/$REPO/blob/$BRANCH/docs-camera/58-WindowsアプリにするElectron.md)
 NOTES
 )"
   if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
     echo "  既存 Release にアセットを上書きアップロード..."
     gh release upload "$TAG" "${assets[@]}" --repo "$REPO" --clobber
-    echo "  Release の説明を更新..."
-    gh release edit "$TAG" --repo "$REPO" --notes "$notes"
+    echo "  Release のタイトルと説明を更新..."
+    gh release edit "$TAG" --repo "$REPO" --title "Guruguru Avatar v${VERSION}" --notes "$notes"
   else
-    echo "  新規 Release を作成..."
+    echo "  新規 Release を作成（アセット同時添付）..."
     gh release create "$TAG" "${assets[@]}" --repo "$REPO" --target "$BRANCH" \
-      --title "リレイサーバ v${VERSION}" --notes "$notes"
+      --title "Guruguru Avatar v${VERSION}" --notes "$notes"
   fi
   echo "✓ Release: https://github.com/$REPO/releases/tag/$TAG"
 
-  # リリース直後は CDN 反映待ちがあるので、zip が実際に取得可能になるまで待ってから
-  # test-release-win11.ps1 で実機テストする。
+  # リリース直後は CDN 反映待ちがあるので、全アセットが実際に取得可能になるまで
+  # 待ってから test-release-win11.ps1 で実機テストする（E2E は portable を落とすが、
+  # ユーザーは Setup を落とすので両方の到達を確認する）。
   local NAME LOCAL_SIZE
-  NAME="$(basename "$ZIP")"
-  LOCAL_SIZE="$(stat -c%s "$ZIP")"
-  if ! wait_release_zip_ready "$TAG" "$NAME" "$LOCAL_SIZE"; then
-    echo "エラー: リリース zip が取得可能になりませんでした。テストを中止します。"
-    exit 1
-  fi
+  for f in "${assets[@]}"; do
+    NAME="$(basename "$f")"
+    LOCAL_SIZE="$(stat -c%s "$f")"
+    if ! wait_release_asset_ready "$TAG" "$NAME" "$LOCAL_SIZE"; then
+      echo "エラー: リリースアセットが取得可能になりませんでした: $NAME"
+      exit 1
+    fi
+  done
   run_win_test "$TAG"
 }
 
-# ── リリース zip が GitHub 上でダウンロード可能になるまで待つ ──────────────
+# ── リリースアセットが GitHub 上でダウンロード可能になるまで待つ ────────────
 # API 上でアセットが state=uploaded かつローカルと同サイズで載り、実ダウンロード
 # （先頭 1 バイトの range GET）が 200/206 を返したら「取得可能」とみなす。
-wait_release_zip_ready() {
+wait_release_asset_ready() {
   local TAG="$1" NAME="$2" SIZE="$3"
   local url="https://github.com/$REPO/releases/download/$TAG/$NAME"
-  echo "== リリース zip が取得可能になるまで待機: $NAME =="
+  echo "== リリースアセットが取得可能になるまで待機: $NAME =="
   local i line asize astate code
   for i in $(seq 1 60); do
     line=$(gh release view "$TAG" --repo "$REPO" --json assets \
@@ -191,7 +232,7 @@ wait_release_zip_ready() {
       # 実ダウンロードで到達確認（range GET で先頭だけ）。
       code=$(curl -fsSL -r 0-0 --max-time 30 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || echo "000")
       if [ "$code" = "200" ] || [ "$code" = "206" ]; then
-        echo "✓ zip 取得可能: $url (size=$asize, http=$code)"
+        echo "✓ アセット取得可能: $url (size=$asize, http=$code)"
         return 0
       fi
     fi
