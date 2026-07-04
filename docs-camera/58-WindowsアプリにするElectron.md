@@ -7,6 +7,9 @@ Linux は AppImage を起動するだけ。macOS 向けは配布しない（elec
 ビルドは macOS 実機でしかできず、実機テストも署名・公証もできないため。
 Web 版 か `npm run build:local && npm start` を案内する）。
 
+> **サポート対象は Windows 版のみ。** Linux（AppImage）は動作保証のない「おまけ」配布で
+> （ビルド・既定リリースには含めるが動作確認は WSLg の起動スモークのみ）、macOS は配布なし。
+
 `53-単体EXEにする.md` の Bun バイナリ版は「中継サーバだけ」を配るのに対し、こちらは
 **カメラ UI 付きのアプリ窓ごと**配る。OBS は同一機の透過 URL を見るだけでよい。
 

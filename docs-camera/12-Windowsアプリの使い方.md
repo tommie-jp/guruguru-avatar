@@ -6,9 +6,12 @@ OBS で「ぐるぐるアバター」を透過オーバーレイ表示するた�
 ファイアウォール開放も要らない（スマホをカメラにする場合のみ Tailscale を使う）。
 
 - ダウンロード: [リリースページ](https://github.com/tommie-jp/guruguru-avatar/releases/latest)
-- 実行確認は Windows 11 のみ。Linux（AppImage）は WSL2/WSLg での起動確認のみ。
-- macOS 向けバイナリは配布していません（「[macOS で使う](#macos-で使う配布物なし)」参照）。
 
+> **サポート対象は Windows 版のみです。** 動作確認・不具合対応は Windows 11 でのみ行います。
+> Linux（AppImage）は動作保証のない「おまけ」配布（サポート外・自己責任。WSL2/WSLg での
+> 起動確認のみ）。macOS はバイナリ配布なし（「[macOS で使う](#macos-で使う配布物なし)」）。
+> Windows 以外は Web 版か、ソースから `npm run build:local && npm start` を推奨します。
+>
 > 旧 zip 配布（`guruguru-relay.exe` + `start.bat`、win-v1.9.x 以前）から移行する場合は、
 > 末尾の「[旧 zip からの移行](#旧-zip-からの移行)」を参照。
 

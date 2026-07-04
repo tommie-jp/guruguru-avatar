@@ -162,10 +162,14 @@ release_app() {
 起動するだけで、Web カメラ（またはスマホ）の顔の動きに同調するアバターを
 OBS に透過オーバーレイ表示できます。
 
+**サポート対象は Windows 版のみです。** Linux（AppImage）は動作保証のない「おまけ」配布
+（サポート外・自己責任）、macOS はバイナリ配布なし。Windows 以外は Web 版か、ソースから
+\`npm run build:local && npm start\` の利用を推奨します。
+
 アセット（使う OS のものを 1 つでよい）:
 - GuruguruAvatar-Setup-${VERSION}.exe … Windows インストーラ（デスクトップショートカット作成）
 - GuruguruAvatar-${VERSION}-portable.exe … Windows インストール不要の単体 exe
-- GuruguruAvatar-${VERSION}-linux-x86_64.AppImage … Linux 用（x86_64）
+- GuruguruAvatar-${VERSION}-linux-x86_64.AppImage … Linux 用（x86_64・サポート外）
 
 使い方（Windows・実行確認は Windows 11）:
 1. exe をダウンロードして実行（「発行元不明」が出たら「詳細情報」→「実行」）。
