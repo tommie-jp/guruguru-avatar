@@ -174,7 +174,7 @@ OBS に透過オーバーレイ表示できます。
 
 使い方（Linux・起動確認は WSL2/WSLg のみ）:
 1. \`chmod +x GuruguruAvatar-${VERSION}-linux-x86_64.AppImage\` して実行。以降は Windows と同じ。
-2. 「AppImages require FUSE」と出る環境では \`--appimage-extract-and-run\` を付けて実行するか、libfuse2 を導入する。
+2. 「AppImages require FUSE」と出る環境では \`--appimage-extract-and-run\` を付けて実行するか、libfuse2 を導入する（Ubuntu 24.04 以降はパッケージ名 libfuse2t64）。
 
 macOS: バイナリ配布はありません（ビルド・動作確認とも macOS 実機が必要なため）。
 [Web 版](https://tommie-jp.github.io/guruguru-avatar/) を使うか、ソースから

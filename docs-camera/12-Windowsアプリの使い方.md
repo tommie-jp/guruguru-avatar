@@ -87,8 +87,9 @@ chmod +x GuruguruAvatar-<version>-linux-x86_64.AppImage
 ./GuruguruAvatar-<version>-linux-x86_64.AppImage
 ```
 
-- **「AppImages require FUSE」と出る場合**（Ubuntu 22.04+ など libfuse2 が無い環境）は、
-  `--appimage-extract-and-run` を付けて実行するか、`sudo apt install libfuse2` を先に行う。
+- **「AppImages require FUSE」と出る場合**（Ubuntu 22.04+ / WSL など libfuse2 が無い環境）は、
+  `--appimage-extract-and-run` を付けて実行するか、先に libfuse2 を導入する
+  （Ubuntu 24.04 以降: `sudo apt install libfuse2t64` ／ 22.04: `sudo apt install libfuse2`）。
 - 起動確認は WSL2/WSLg（ビルド機）でのみ行っている。実 Linux デスクトップでの
   動作報告・不具合は issue へ。
 - ユーザーデータは `~/.config/Guruguru Avatar/` に保存される。
