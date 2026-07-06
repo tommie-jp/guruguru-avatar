@@ -25,7 +25,7 @@ const { useRef, useState, useEffect } = React;
  * @param {(data:{scene:object,w:number,h:number})=>void} [o.onDrawScene]  rx: お絵かきシーン受信
  * @param {(data:{phase:string,id:number,pts?:Array,color?:string,width?:number,w?:number,h?:number})=>void} [o.onDrawLive]  rx: 描画途中のライブストローク受信
  * @param {(data:{x:number,y:number,w:number,h:number,show:boolean})=>void} [o.onCursor]  rx: マウスカーソル受信
- * @param {(data:{text:string,bgColor:string,textColor:string,speed:number,visible:boolean})=>void} [o.onTicker]  rx: テロップ設定受信
+ * @param {(data:{text:string,bgColor:string,textColor:string,speed:number,visible:boolean,posY:number,opacity:number})=>void} [o.onTicker]  rx: テロップ設定受信
  * @returns {{ sendState:Function, sendConfig:Function, sendCue:(id:string, over?:{stamp?:string,color?:string})=>void,
  *            sendDrawScene:(data:object)=>void, sendDrawLive:(data:object)=>void, sendCursor:(data:object)=>void, sendTicker:(data:object)=>void, peer:{connected:boolean,count:number}, linkUp:boolean }}
  */

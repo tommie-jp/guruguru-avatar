@@ -1,7 +1,8 @@
 // テロップ（CNN 風・下部クロール）の設定を正規化・検証する純関数群と URL パラメータ解析。
 //
-// テロップ設定は tx→rx へ専用 `ticker` メッセージ（{text,bgColor,textColor,speed,visible}）で
-// 流れる。WS は無認証なので、rx が受信した値はここで必ず検証してから表示に使う
+// テロップ設定は tx→rx へ専用 `ticker` メッセージ
+// （{text,bgColor,textColor,speed,visible,posY,opacity}）で流れる。posY=上下位置（下端からの
+// ビューポート高割合）、opacity=不透明度。WS は無認証なので、rx が受信した値はここで必ず検証してから表示に使う
 // （偽注入・暴走対策。draw-live の点列検証や cue の色検証と同じ方針）。
 // obs-mode.js / draw-mode.js と同じ「起動時に一度だけ解析する純関数」の流儀に揃える。
 
@@ -12,14 +13,22 @@ export const SPEED_MIN = 10;
 export const SPEED_MAX = 400;
 // クロール1周の最小時間（速すぎ・短すぎでチカチカしないための下限）。
 export const MIN_CRAWL_MS = 1000;
+// 上下位置（下端からの距離。ビューポート高に対する割合 0..1）の上限。
+// バーが画面外へ完全に消えないよう上限を設ける（ドラッグ側はバー高で更に厳しくクランプする）。
+export const MAX_POS_Y = 0.9;
+// 不透明度の下限（誤操作でテロップが完全に見えなくならないように）。
+export const OPACITY_MIN = 0.15;
 
 // 既定値。visible=false なので、操作側が表示を ON にするまで何も出ない。
+// posY=0（最下部）・opacity=1（不透明）が既定。
 export const TICKER_DEFAULTS = Object.freeze({
   text: '',
   bgColor: '#cc0000',   // CNN 風の赤バー
   textColor: '#ffffff',
   speed: 90,            // px/秒
   visible: false,
+  posY: 0,              // 下端からの位置（ビューポート高に対する割合 0..MAX_POS_Y）
+  opacity: 1,           // 不透明度（OPACITY_MIN..1）
 });
 
 // #rgb / #rrggbb のみ許容（input[type=color] は #rrggbb を返すが受信値は何でも来うる）。
@@ -43,6 +52,20 @@ export function clampSpeed(v) {
   return Math.min(SPEED_MAX, Math.max(SPEED_MIN, Math.round(n)));
 }
 
+// 上下位置（下端からの割合）を 0..MAX_POS_Y に収める。非数値は 0（最下部）。小数4桁に丸める。
+export function clampPosY(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(Math.min(MAX_POS_Y, Math.max(0, n)) * 1e4) / 1e4;
+}
+
+// 不透明度を OPACITY_MIN..1 に収める。非数値は 1（不透明）。小数2桁に丸める。
+export function clampOpacity(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 1;
+  return Math.round(Math.min(1, Math.max(OPACITY_MIN, n)) * 100) / 100;
+}
+
 // 文言を1行クロール用に整える。制御文字を空白へ畳み、長さ上限で切る。
 // 先に上限で切ってから置換する（置換は1文字→1文字で長さ不変なので結果は同じ。
 // 巨大な受信文字列でも走査コストを O(MAX_TICKER_TEXT_LEN) に抑える防御）。
@@ -61,6 +84,8 @@ export function normalizeTickerConfig(data) {
     textColor: normalizeHexColor(d.textColor, TICKER_DEFAULTS.textColor),
     speed: clampSpeed(d.speed),
     visible: d.visible === true, // 厳密 true のみ（truthy な 1/"true" は不可）
+    posY: clampPosY(d.posY),
+    opacity: clampOpacity(d.opacity),
   };
 }
 

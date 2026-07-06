@@ -17,7 +17,7 @@
 //                       （描画途中のペンストロークをリアルタイムに流す。phase='start'|'move'|'end'。
 //                        start=初点+color/width/w/h、move=増分ポイントのみ、end=id だけ。cursor と同じく
 //                        ephemeral＝後着 OBS への再送はしない。確定は draw-scene が担い rx が到着で置換）
-//       ticker        : { type:'ticker', data:{ text, bgColor, textColor, speed, visible } }  producer→consumer
+//       ticker        : { type:'ticker', data:{ text, bgColor, textColor, speed, visible, posY, opacity } }  producer→consumer
 //                       （CNN 風の下部テロップ設定。累積状態＝変更時のみ送るので後着 OBS へは
 //                        need-config で再送する（draw-scene と同様）。クロールのアニメは rx が
 //                        設定からローカル駆動するので、毎フレームは流れない）
@@ -40,7 +40,7 @@ const MAX_BACKOFF_MS = 8000;
  * @param {(data:{scene:object,w:number,h:number})=>void} [o.onDrawScene]  draw-scene 受信（rx 用・お絵かきシーン）
  * @param {(data:{phase:string,id:number,pts?:Array,color?:string,width?:number,w?:number,h?:number})=>void} [o.onDrawLive]  draw-live 受信（rx 用・描画途中のライブストローク）
  * @param {(data:{x:number,y:number,w:number,h:number,show:boolean})=>void} [o.onCursor]  cursor 受信（rx 用・マウスカーソル）
- * @param {(data:{text:string,bgColor:string,textColor:string,speed:number,visible:boolean})=>void} [o.onTicker]  ticker 受信（rx 用・テロップ設定）
+ * @param {(data:{text:string,bgColor:string,textColor:string,speed:number,visible:boolean,posY:number,opacity:number})=>void} [o.onTicker]  ticker 受信（rx 用・テロップ設定）
  * @param {()=>void} [o.onNeedConfig]                  config 要求受信（tx 用）
  * @param {(msg:object)=>void} [o.onPeer]              接続通知受信（tx 用）
  * @param {(s:{connected:boolean})=>void} [o.onStatus] 自身の接続状態変化

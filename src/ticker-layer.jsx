@@ -2,20 +2,22 @@
 //
 // 役割は2つ（draw-layer.jsx と同じ edit/view 分割）:
 //   - mode='edit'（操作側 tx/local）: 下部バーのプレビュー＋コントロールUI（文言・背景色・文字色・
-//       速度・表示ON/OFF）。設定が変わるたび onConfigChange(config) を呼ぶ → camera-app が
-//       relay で rx(OBS) へ送る。
+//       速度・濃さ=不透明度・表示ON/OFF）＋バー左端の位置アイコン(⠿・お絵かきのハンドルと同じ見た目)を
+//       ドラッグで上下位置を調整。設定が変わるたび onConfigChange(config) を呼ぶ → camera-app が relay で rx(OBS) へ送る。
 //   - mode='view'（OBS 側 rx）: setConfig(data) で受信設定を反映し、下部バーを描くだけ（操作UI無し）。
 //
-// クロールのアニメは CSS keyframes で rx がローカル駆動する（受信するのは設定だけ・毎フレームは
+// クロールのアニメは Web Animations API で rx がローカル駆動する（受信するのは設定だけ・毎フレームは
 // 流れない）。テキストを2コピー並べ translateX(0→-50%) で継ぎ目なくループする。各コピーは
 // 最低でもバー幅（100vw）を占めるので、短い文言でも隙間なくループする。
 //
-// 透過: バー以外は塗らない（コンテナ pointerEvents:none）。既存の obsMode 透過にそのまま乗る。
+// レイヤー: 帯は z=4（DrawLayer=6 より下）＝お絵かきがテロップの上に乗る。帯は pointerEvents:none で
+// アバター操作を邪魔しない。操作コントロールは別の最前面パネル（DraggablePanel z=9）として出す。
+// 透過: バー以外は塗らない。既存の obsMode 透過にそのまま乗る。
 // 検証: 受信値は ticker-config.js の normalizeTickerConfig で必ず正規化してから使う（無認証 WS）。
 import React from 'react';
 import { DraggablePanel } from './draggable-panel.jsx';
 import {
-  TICKER_DEFAULTS,
+  TICKER_DEFAULTS, OPACITY_MIN,
   normalizeTickerConfig, crawlDurationMs,
 } from './ticker-config.js';
 
@@ -23,6 +25,7 @@ const { useState, useRef, useEffect, useLayoutEffect, useImperativeHandle, forwa
 
 const FONT_FAMILY = "'Zen Maru Gothic', sans-serif";
 const SEND_DEBOUNCE_MS = 160;    // 設定変更→送信のまとめ送り
+const POS_SEND_MS = 50;          // 上下ドラッグ中の位置送信の間引き（約20fps。末尾は pointerup で確定）
 const GAP_VW = 6;                // 文言の繰り返し間隔（長文が続けて並ばないように）
 // クロールの1周分（トラックの2コピーぶん＝ -50%）。Web Animations API で駆動する。
 const CRAWL_KEYFRAMES = [{ transform: 'translateX(0)' }, { transform: 'translateX(-50%)' }];
@@ -43,6 +46,14 @@ function loadPrefs() {
 }
 function savePrefs(cfg) {
   try { localStorage.setItem(LS_KEY, JSON.stringify(cfg)); } catch { /* noop */ }
+}
+
+// CSS の 100vh に一致するビューポート高(px)。window.innerHeight はモバイルの動的 URL バーで
+// 100vh とズレるため、レイアウトビューポート＝documentElement.clientHeight を優先する。
+function viewportHeightPx() {
+  if (typeof document !== 'undefined' && document.documentElement?.clientHeight) return document.documentElement.clientHeight;
+  if (typeof window !== 'undefined' && window.innerHeight) return window.innerHeight;
+  return 1;
 }
 
 function TickerLayerImpl(props, ref) {
@@ -78,17 +89,81 @@ function TickerLayerImpl(props, ref) {
     sendTimerRef.current = setTimeout(() => sendNow(cfg), SEND_DEBOUNCE_MS);
   }, [sendNow]);
 
-  // edit: 1フィールド更新して保存＋送信。文字/色/速度はデバウンス、表示ON/OFFは即時送信
-  // （消し忘れ防止＝トグル直後にタブを閉じても rx へ確実に届く）。
-  // 副作用は setCfg の updater 外で行う（StrictMode の updater 二重実行で多重送信しないため）。
-  const updateField = useCallback((patch, immediate = false) => {
-    if (!isEdit) return;
+  // ローカル状態を確定する（正規化→ref即反映→setCfg）。保存/送信は呼び出し側が足す。
+  // 副作用を setCfg の updater 外で行う（StrictMode の updater 二重実行で多重送信しないため）。
+  const commitLocal = useCallback((patch) => {
     const next = normalizeTickerConfig({ ...configRef.current, ...patch });
     configRef.current = next; // 同一tick内の連続更新が正しく積み上がるよう即反映
     setCfg(next);
+    return next;
+  }, []);
+
+  // edit: 1フィールド更新して保存＋送信。文字/色/速度/濃さはデバウンス、表示ON/OFFは即時送信
+  // （消し忘れ防止＝トグル直後にタブを閉じても rx へ確実に届く）。
+  const updateField = useCallback((patch, immediate = false) => {
+    if (!isEdit) return;
+    const next = commitLocal(patch);
     savePrefs(next);
     if (immediate) sendNow(next); else scheduleSend(next);
-  }, [isEdit, sendNow, scheduleSend]);
+  }, [isEdit, commitLocal, sendNow, scheduleSend]);
+
+  // --- tx: 位置アイコンで上下ドラッグ（上下のみ・左右は動かさない） --------------
+  const barRef = useRef(null);        // バー本体（高さ計測＝画面内クランプ用）
+  const posThrottleRef = useRef(0);   // ドラッグ中送信の間引きタイマー
+  const posCleanupRef = useRef(null); // 実行中ドラッグの後始末（アンマウント時にも呼ぶ）
+
+  // ドラッグ中: 位置をローカル即反映（プレビュー）＋送信は間引く（保存/確定は pointerup）。
+  const updatePosLive = useCallback((posY) => {
+    commitLocal({ posY });
+    if (!posThrottleRef.current) {
+      posThrottleRef.current = setTimeout(() => { posThrottleRef.current = 0; sendNow(configRef.current); }, POS_SEND_MS);
+    }
+  }, [commitLocal, sendNow]);
+
+  const onPosPointerDown = useCallback((e) => {
+    if (!isEdit) return;
+    e.preventDefault();
+    const el = e.currentTarget;
+    // 描画は bottom:posY*100vh（CSS vh）。ドラッグ計算も vh に一致させるため clientHeight を使う
+    // （window.innerHeight はモバイルの動的URLバーで 100vh とズレて追従倍率が狂う）。
+    const vh = viewportHeightPx();
+    const startY = e.clientY;
+    const startBottomPx = (configRef.current.posY || 0) * vh;
+    const barH = barRef.current?.offsetHeight || 0;
+    try { el.setPointerCapture?.(e.pointerId); } catch { /* noop */ }
+    const move = (ev) => {
+      const deltaY = ev.clientY - startY;                                     // 上へ動かすと負
+      const maxBottom = Math.max(0, vh - barH);                               // 画面内に収まる上限
+      const bottomPx = Math.min(maxBottom, Math.max(0, startBottomPx - deltaY)); // 上ドラッグ→上昇
+      updatePosLive(vh > 0 ? bottomPx / vh : 0);
+    };
+    // pointerup / pointercancel いずれでも必ず後始末する（タッチの OS ジェスチャ横取り＝
+    // pointercancel でもリスナ/状態を残さない。capture したハンドル要素に張るので確実に届く）。
+    const end = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', end);
+      el.removeEventListener('pointercancel', end);
+      clearTimeout(posThrottleRef.current); posThrottleRef.current = 0;
+      posCleanupRef.current = null;
+      savePrefs(configRef.current);  // 最終位置を保存
+      sendNow(configRef.current);    // 最終位置を確定送信
+    };
+    posCleanupRef.current = () => { // アンマウント時は後始末のみ（保存/送信はしない）
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', end);
+      el.removeEventListener('pointercancel', end);
+      clearTimeout(posThrottleRef.current); posThrottleRef.current = 0;
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+  }, [isEdit, updatePosLive, sendNow]);
+
+  // アンマウント時に実行中ドラッグのリスナ/タイマーを掃除。
+  useEffect(() => () => {
+    clearTimeout(posThrottleRef.current);
+    if (posCleanupRef.current) posCleanupRef.current();
+  }, []);
 
   // --- クロール時間の算出（幅 / 速度）。文言・速度・表示・リサイズで測り直す。 ----
   useLayoutEffect(() => {
@@ -159,49 +234,74 @@ function TickerLayerImpl(props, ref) {
   const showBar = config.visible && !!config.text;
 
   return (
-    <div
-      aria-hidden={!isEdit}
-      style={{
-        position: 'fixed', left: 0, right: 0, bottom: 0,
-        zIndex: 8, pointerEvents: 'none',
-      }}
-    >
+    <>
+      {/* テロップ帯。z=4 は DrawLayer(z=6) より下＝お絵かきがテロップの上に乗る（tx の要望）。
+          帯自体は入力を受けない（pointerEvents:none）ので下のアバター操作を邪魔しない。
+          下端からの距離 posY（ビューポート高の割合）で上下に配置。左右は全幅固定。 */}
       {showBar ? (
         <div
-          // バー本体。全幅＋背景色。はみ出す文言はクリップしてクロールで見せる。
+          ref={barRef}
+          aria-hidden={!isEdit}
           style={{
-            width: '100%', overflow: 'hidden', boxSizing: 'border-box',
-            background: config.bgColor,
-            boxShadow: '0 -2px 8px rgba(0,0,0,0.25)',
+            position: 'fixed', left: 0, right: 0, bottom: `${config.posY * 100}vh`,
+            zIndex: 4, pointerEvents: 'none',
           }}
         >
           <div
-            ref={trackRef}
-            // クロールするトラック（2コピー）。-50% で継ぎ目なくループ。動きは WAAP（上の effect）が当てる。
+            // バー本体。全幅＋背景色＋不透明度。はみ出す文言はクリップしてクロールで見せる。
             style={{
-              display: 'inline-flex', flexWrap: 'nowrap', whiteSpace: 'nowrap',
-              willChange: 'transform',
+              width: '100%', overflow: 'hidden', boxSizing: 'border-box',
+              background: config.bgColor, opacity: config.opacity,
+              boxShadow: '0 -2px 8px rgba(0,0,0,0.25)',
             }}
           >
-            {[0, 1].map((i) => (
-              <span
-                key={i}
-                ref={i === 0 ? measureRef : undefined}
-                aria-hidden={i === 1 ? 'true' : undefined}
-                style={{
-                  display: 'inline-block', boxSizing: 'border-box',
-                  minWidth: '100vw',            // 短文でも最低バー幅＝隙間なくループ
-                  paddingRight: `${GAP_VW}vw`,  // 長文の繰り返し間隔
-                  color: config.textColor,
-                  fontFamily: FONT_FAMILY, fontWeight: 800,
-                  fontSize: 'clamp(16px, 3.4vmin, 30px)', lineHeight: 1.7,
-                  letterSpacing: '0.02em',
-                }}
-              >
-                {config.text}
-              </span>
-            ))}
+            <div
+              ref={trackRef}
+              // クロールするトラック（2コピー）。-50% で継ぎ目なくループ。動きは WAAP（上の effect）が当てる。
+              style={{
+                display: 'inline-flex', flexWrap: 'nowrap', whiteSpace: 'nowrap',
+                willChange: 'transform',
+              }}
+            >
+              {[0, 1].map((i) => (
+                <span
+                  key={i}
+                  ref={i === 0 ? measureRef : undefined}
+                  aria-hidden={i === 1 ? 'true' : undefined}
+                  style={{
+                    display: 'inline-block', boxSizing: 'border-box',
+                    minWidth: '100vw',            // 短文でも最低バー幅＝隙間なくループ
+                    paddingRight: `${GAP_VW}vw`,  // 長文の繰り返し間隔
+                    color: config.textColor,
+                    fontFamily: FONT_FAMILY, fontWeight: 800,
+                    fontSize: 'clamp(16px, 3.4vmin, 30px)', lineHeight: 1.7,
+                    letterSpacing: '0.02em',
+                  }}
+                >
+                  {config.text}
+                </span>
+              ))}
+            </div>
           </div>
+
+          {/* 位置アイコン。tx(操作側)のバー左端にだけ出す。お絵かきツールのドラッグハンドルと同じ ⠿ 見た目。
+              ドラッグで上下だけ移動する（ダブルクリックで最下部へ）。帯は pointerEvents:none だがここは auto。 */}
+          {isEdit ? (
+            <div
+              onPointerDown={onPosPointerDown}
+              onDoubleClick={() => updateField({ posY: 0 }, true)}
+              title="ドラッグで上下に移動（ダブルクリックで最下部へ）"
+              aria-label="テロップの上下位置"
+              style={{
+                position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)',
+                pointerEvents: 'auto', cursor: 'ns-resize', touchAction: 'none',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: '6px 8px', borderRadius: 7,
+                background: 'rgba(255,255,255,0.16)', color: 'rgba(255,255,255,0.85)',
+                fontSize: 16, lineHeight: 1, letterSpacing: 1, userSelect: 'none',
+              }}
+            >⠿</div>
+          ) : null}
         </div>
       ) : null}
 
@@ -212,11 +312,12 @@ function TickerLayerImpl(props, ref) {
           onBgColor={(v) => updateField({ bgColor: v })}
           onTextColor={(v) => updateField({ textColor: v })}
           onSpeed={(v) => updateField({ speed: v })}
+          onOpacity={(v) => updateField({ opacity: v })}
           onToggleVisible={() => updateField({ visible: !config.visible }, true)}
           defaultStyle={controlsDefaultStyle}
         />
       ) : null}
-    </div>
+    </>
   );
 }
 
@@ -229,7 +330,7 @@ const CTRLBTN_STYLE = (on) => ({
 
 const DEFAULT_CTRL_POS = { top: 10, left: '50%', transform: 'translateX(-50%)' };
 
-function TickerControls({ config, onText, onBgColor, onTextColor, onSpeed, onToggleVisible, defaultStyle }) {
+function TickerControls({ config, onText, onBgColor, onTextColor, onSpeed, onOpacity, onToggleVisible, defaultStyle }) {
   // DrawToolbar と同じ作り: 左端に固定ドラッグハンドル＋右に操作子の横スクロール帯。
   return (
     <DraggablePanel
@@ -312,6 +413,19 @@ function TickerControls({ config, onText, onBgColor, onTextColor, onSpeed, onTog
             <option key={p.v} value={p.v} style={{ color: '#000', background: '#fff' }}>速さ: {p.label}</option>
           ))}
         </select>
+        <label
+          style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 4 }}
+          title="テロップの濃さ（右=不透明 / 左=透明）"
+        >
+          <span style={{ opacity: 0.8 }}>濃さ</span>
+          <input
+            type="range" min={OPACITY_MIN} max={1} step={0.05}
+            value={config.opacity}
+            onChange={(e) => onOpacity(Number(e.target.value))}
+            aria-label="テロップの濃さ（不透明度）"
+            style={{ flex: '0 0 auto', width: 80, cursor: 'pointer' }}
+          />
+        </label>
       </div>
     </DraggablePanel>
   );

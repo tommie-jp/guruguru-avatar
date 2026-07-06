@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   TICKER_DEFAULTS, MAX_TICKER_TEXT_LEN, SPEED_MIN, SPEED_MAX, MIN_CRAWL_MS,
+  MAX_POS_Y, OPACITY_MIN,
   normalizeHexColor, clampSpeed, sanitizeTickerText, normalizeTickerConfig,
-  crawlDurationMs, parseTickerParams,
+  clampPosY, clampOpacity, crawlDurationMs, parseTickerParams,
 } from './ticker-config';
 
 describe('normalizeHexColor', () => {
@@ -71,6 +72,46 @@ describe('sanitizeTickerText', () => {
   });
 });
 
+describe('clampPosY', () => {
+  it('0..MAX_POS_Y の範囲内はそのまま（丸め）', () => {
+    expect(clampPosY(0)).toBe(0);
+    expect(clampPosY(0.5)).toBe(0.5);
+    expect(clampPosY(0.12345)).toBe(0.1235); // 4桁丸め
+  });
+
+  it('範囲外は 0..MAX_POS_Y にクランプ', () => {
+    expect(clampPosY(-0.3)).toBe(0);
+    expect(clampPosY(5)).toBe(MAX_POS_Y);
+  });
+
+  it('非数値は 0（最下部）へフォールバック', () => {
+    expect(clampPosY('up')).toBe(0);
+    expect(clampPosY(NaN)).toBe(0);
+    expect(clampPosY(Infinity)).toBe(0);
+    expect(clampPosY(undefined)).toBe(0);
+  });
+});
+
+describe('clampOpacity', () => {
+  it('OPACITY_MIN..1 の範囲内はそのまま（丸め）', () => {
+    expect(clampOpacity(1)).toBe(1);
+    expect(clampOpacity(0.5)).toBe(0.5);
+    expect(clampOpacity(0.678)).toBe(0.68); // 2桁丸め
+  });
+
+  it('範囲外は OPACITY_MIN..1 にクランプ', () => {
+    expect(clampOpacity(0)).toBe(OPACITY_MIN);
+    expect(clampOpacity(-1)).toBe(OPACITY_MIN);
+    expect(clampOpacity(2)).toBe(1);
+  });
+
+  it('非数値は 1（不透明）へフォールバック', () => {
+    expect(clampOpacity('half')).toBe(1);
+    expect(clampOpacity(NaN)).toBe(1);
+    expect(clampOpacity(undefined)).toBe(1);
+  });
+});
+
 describe('normalizeTickerConfig', () => {
   it('空・非オブジェクトは既定へ', () => {
     expect(normalizeTickerConfig(undefined)).toEqual(TICKER_DEFAULTS);
@@ -82,14 +123,20 @@ describe('normalizeTickerConfig', () => {
   it('正しい値は正規化して通す', () => {
     expect(normalizeTickerConfig({
       text: 'BREAKING', bgColor: '#000000', textColor: '#ffffff', speed: 120, visible: true,
-    })).toEqual({ text: 'BREAKING', bgColor: '#000000', textColor: '#ffffff', speed: 120, visible: true });
+      posY: 0.3, opacity: 0.8,
+    })).toEqual({
+      text: 'BREAKING', bgColor: '#000000', textColor: '#ffffff', speed: 120, visible: true,
+      posY: 0.3, opacity: 0.8,
+    });
   });
 
   it('部分的に不正な値は各フィールド既定へ落とす', () => {
     expect(normalizeTickerConfig({
       text: 'ok', bgColor: 'notacolor', textColor: '#abc', speed: 'nope', visible: 1,
+      posY: 'x', opacity: 5,
     })).toEqual({
       text: 'ok', bgColor: TICKER_DEFAULTS.bgColor, textColor: '#abc', speed: TICKER_DEFAULTS.speed, visible: false,
+      posY: 0, opacity: 1,
     });
   });
 
