@@ -9,6 +9,7 @@ import { composeSignals } from './face/compose-signals';
 import { parseObsParams } from './obs-mode';
 import { parseRelayMode } from './relay-mode';
 import { parseDrawParams } from './draw-mode';
+import { parseTickerParams } from './ticker-config';
 import { computeStateFrame, createExprState } from './face/avatar-state';
 import { computeDirectionRange, rawDirForDisplay } from './face/direction-range';
 import {
@@ -28,6 +29,7 @@ import { createSoundboard } from './cue-audio.js';
 import { createCueController, isTypingTarget, parseCueParam } from './cue-system.js';
 import { CueStampLayer } from './cue-stamp.jsx';
 import { DrawLayer } from './draw-layer.jsx';
+import { TickerLayer } from './ticker-layer.jsx';
 import { CueOffsetEditor } from './cue-offset-editor.jsx';
 import { CueBar, CUEBAR_CTRL_W, CUEBAR_COL_W, CUEBAR_BTN_H } from './cue-bar.jsx';
 import { SlideBar } from './slide-bar.jsx';
@@ -591,6 +593,17 @@ function App() {
   const handleDrawLive = useCallback((data) => { drawLiveSendRef.current?.(data); }, []);
   // tx: マウスカーソル位置を relay で rx(OBS) へ送る。
   const handleCursorMove = useCallback((data) => { cursorSendRef.current?.(data); }, []);
+  // テロップ（CNN 風・下部クロール）。お絵かきとは独立。rx(OBS)は受信表示(view)、tx/local は操作(edit)。
+  // ?ticker=0 のときだけ off（レイヤー自体を出さない）。URL は起動時固定なので一度だけ解析。
+  const tickerParam = useMemo(
+    () => parseTickerParams(typeof window !== 'undefined' ? window.location.search : ''),
+    [],
+  );
+  const tickerMode = isRx ? 'view' : (tickerParam.ticker === false ? 'off' : 'edit');
+  const tickerLayerRef = useRef(null);
+  const tickerSendRef = useRef(null); // relayApi.sendTicker を後で差す（render 末で代入）
+  // tx: テロップ設定が変わったら relay で rx(OBS) へ送る。relayApi は毎レンダー変わるので ref 越しに呼ぶ。
+  const handleTickerChange = useCallback((cfg) => { tickerSendRef.current?.(cfg); }, []);
   const [panelOpen, setPanelOpen] = useState(false); // obsMode 中に T キーで Tweaks を開閉
   // rx は受信した設定で描画し、それ以外はローカルの tweaks を使う。
   const [rxConfig, setRxConfig] = useState(TWEAK_DEFAULTS);
@@ -1060,6 +1073,8 @@ function App() {
     getConfig: () => syncableTweaks(tweaksRef.current),
     // tx: 後着 OBS(rx) へ現在のお絵かきシーンを再送する（空なら null）。
     getDrawScene: () => drawLayerRef.current?.getScene() ?? null,
+    // tx: 後着 OBS(rx) へ現在のテロップ設定を再送する（非表示・空なら null）。
+    getTicker: () => tickerLayerRef.current?.getConfig() ?? null,
     onState: (arr) => { latestFrameRef.current = decodeStateFrame(arr); },
     onConfig: (cfg) => setRxConfig((prev) => ({ ...prev, ...cfg })),
     // rx: 受信したお絵かきシーンを再描画（DrawLayer 側で件数・サイズを検証）。
@@ -1068,6 +1083,8 @@ function App() {
     onDrawLive: (data) => drawLayerRef.current?.setLive(data),
     // rx: 受信したマウスカーソルを表示（DrawLayer 側で座標を検証）。
     onCursor: (data) => drawLayerRef.current?.setCursor(data),
+    // rx: 受信したテロップ設定を反映（TickerLayer 側で文言・色・速度を検証）。
+    onTicker: (data) => tickerLayerRef.current?.setConfig(data),
     // rx: tx から来た演出をこの端末(OBS)で再生。カスタム文字/色が同梱されていれば一時オーバーライドに
     // 積んで run（同期）→ pop コールバックが拾う→直後に clear。relay 値は信頼私設網前提だが念のため検証する。
     onCue: (id, over) => {
@@ -1101,6 +1118,8 @@ function App() {
   drawSendRef.current = relayApi.sendDrawScene;
   drawLiveSendRef.current = relayApi.sendDrawLive;
   cursorSendRef.current = relayApi.sendCursor;
+  // テロップ設定の送信口も毎レンダー差し替える。
+  tickerSendRef.current = relayApi.sendTicker;
 
   // tx: 設定が変わったら CEF へ config を送る（数秒ごとの再送はしない＝変更時のみ）。
   useEffect(() => {
@@ -1932,6 +1951,22 @@ function App() {
             bottom: isNarrow ? 'calc(122px + var(--sab))' : 'calc(96px + var(--sab))',
           }}
         ></DrawLayer>
+      ) : null}
+
+      {/* CNN 風の下部テロップ（お絵かきとは独立）。tx/local は ?ticker で操作(edit)、rx(OBS)は受信表示(view)。
+          バーは透過ルートに乗り、コントロールUIは edit かつ非配信(!obsMode)のときだけ出す。 */}
+      {tickerMode !== 'off' ? (
+        <TickerLayer
+          ref={tickerLayerRef}
+          mode={tickerMode}
+          showControls={tickerMode === 'edit' && !obsMode}
+          onConfigChange={handleTickerChange}
+          // 既定位置はお絵かきツールバーの少し上（下部の操作群と重ならないように）。中央寄せ。
+          controlsDefaultStyle={{
+            left: '50%', transform: 'translateX(-50%)',
+            bottom: isNarrow ? 'calc(164px + var(--sab))' : 'calc(138px + var(--sab))',
+          }}
+        ></TickerLayer>
       ) : null}
 
       {/* 演出アイコン帯（cuebar）。お絵かきツールバーと同じ DraggablePanel でマウス移動でき、

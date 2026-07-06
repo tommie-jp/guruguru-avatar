@@ -18,16 +18,18 @@ const { useRef, useState, useEffect } = React;
  * @param {string} o.relayUrl
  * @param {()=>object} [o.getConfig]          tx: need-config への応答に使う現在の tweaks
  * @param {()=>(object|null)} [o.getDrawScene] tx: need-config 時に後着 OBS へ再送するお絵かきシーン（無ければ null）
+ * @param {()=>(object|null)} [o.getTicker]    tx: need-config 時に後着 OBS へ再送するテロップ設定（無ければ null）
  * @param {(frame:Array<number>)=>void} [o.onState]  rx: 状態フレーム受信
  * @param {(tweaks:object)=>void} [o.onConfig]       rx: config 受信
  * @param {(id:string, over:{stamp?:string,color?:string})=>void} [o.onCue]  rx: 演出キュー受信（tx の発火＋カスタム文字/色を再生）
  * @param {(data:{scene:object,w:number,h:number})=>void} [o.onDrawScene]  rx: お絵かきシーン受信
  * @param {(data:{phase:string,id:number,pts?:Array,color?:string,width?:number,w?:number,h?:number})=>void} [o.onDrawLive]  rx: 描画途中のライブストローク受信
  * @param {(data:{x:number,y:number,w:number,h:number,show:boolean})=>void} [o.onCursor]  rx: マウスカーソル受信
+ * @param {(data:{text:string,bgColor:string,textColor:string,speed:number,visible:boolean})=>void} [o.onTicker]  rx: テロップ設定受信
  * @returns {{ sendState:Function, sendConfig:Function, sendCue:(id:string, over?:{stamp?:string,color?:string})=>void,
- *            sendDrawScene:(data:object)=>void, sendDrawLive:(data:object)=>void, sendCursor:(data:object)=>void, peer:{connected:boolean,count:number}, linkUp:boolean }}
+ *            sendDrawScene:(data:object)=>void, sendDrawLive:(data:object)=>void, sendCursor:(data:object)=>void, sendTicker:(data:object)=>void, peer:{connected:boolean,count:number}, linkUp:boolean }}
  */
-export function useRelay(mode, { relayUrl, getConfig, getDrawScene, onState, onConfig, onCue, onDrawScene, onDrawLive, onCursor } = {}) {
+export function useRelay(mode, { relayUrl, getConfig, getDrawScene, getTicker, onState, onConfig, onCue, onDrawScene, onDrawLive, onCursor, onTicker } = {}) {
   const clientRef = useRef(null);
   // CEF（consumer）の接続状態。tx の画面表示用。
   const [peer, setPeer] = useState({ connected: false, count: 0 });
@@ -36,7 +38,7 @@ export function useRelay(mode, { relayUrl, getConfig, getDrawScene, onState, onC
 
   // 最新の closure を ref に保持（再接続を起こさずに中身だけ差し替える）。
   const cbRef = useRef({});
-  cbRef.current = { getConfig, getDrawScene, onState, onConfig, onCue, onDrawScene, onDrawLive, onCursor };
+  cbRef.current = { getConfig, getDrawScene, getTicker, onState, onConfig, onCue, onDrawScene, onDrawLive, onCursor, onTicker };
 
   useEffect(() => {
     if (mode === 'local') {
@@ -53,7 +55,8 @@ export function useRelay(mode, { relayUrl, getConfig, getDrawScene, onState, onC
       onDrawScene: mode === 'rx' ? (data) => cbRef.current.onDrawScene?.(data) : undefined,
       onDrawLive: mode === 'rx' ? (data) => cbRef.current.onDrawLive?.(data) : undefined,
       onCursor: mode === 'rx' ? (data) => cbRef.current.onCursor?.(data) : undefined,
-      // CEF(OBS) が後から繋がったら、config に加えてお絵かきシーンも再送する（取りこぼし防止）。
+      onTicker: mode === 'rx' ? (data) => cbRef.current.onTicker?.(data) : undefined,
+      // CEF(OBS) が後から繋がったら、config に加えてお絵かきシーン・テロップ設定も再送する（取りこぼし防止）。
       // 累積状態なので pose のように毎フレーム送らない → 接続時の再送が必須。
       onNeedConfig: mode === 'tx'
         ? () => {
@@ -61,6 +64,8 @@ export function useRelay(mode, { relayUrl, getConfig, getDrawScene, onState, onC
             if (cfg) client.sendConfig(cfg);
             const scene = cbRef.current.getDrawScene?.();
             if (scene) client.sendDrawScene(scene);
+            const ticker = cbRef.current.getTicker?.();
+            if (ticker) client.sendTicker(ticker);
           }
         : undefined,
       onPeer: mode === 'tx'
@@ -82,6 +87,7 @@ export function useRelay(mode, { relayUrl, getConfig, getDrawScene, onState, onC
     sendDrawScene(data) { clientRef.current?.sendDrawScene(data); },
     sendDrawLive(data) { clientRef.current?.sendDrawLive(data); },
     sendCursor(data) { clientRef.current?.sendCursor(data); },
+    sendTicker(data) { clientRef.current?.sendTicker(data); },
     peer,
     linkUp,
   };
