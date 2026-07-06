@@ -29,6 +29,8 @@ import { createCueController, isTypingTarget, parseCueParam } from './cue-system
 import { CueStampLayer } from './cue-stamp.jsx';
 import { DrawLayer } from './draw-layer.jsx';
 import { CueOffsetEditor } from './cue-offset-editor.jsx';
+import { CueBar, CUEBAR_CTRL_W, CUEBAR_COL_W, CUEBAR_BTN_H } from './cue-bar.jsx';
+import { SlideBar } from './slide-bar.jsx';
 import {
   loadCueOffsets, saveCueOffsets, clampCueOffset,
   sanitizeCueOffsets, equalCueOffsetMaps,
@@ -45,6 +47,7 @@ import {
   cueGlowStore, MAX_CUE_GLOW, cueGlowColorStore, DEFAULT_CUE_GLOW_COLOR,
   cueGainStore, MAX_CUE_GAIN, DEFAULT_CUE_GAIN,
   cueSoundStore, MAX_CUE_SOUND_LEN,
+  loadPanelPref, savePanelPref,
 } from './use-tweaks.js';
 import { GESTURES, sampleGesture, gestureTransform } from './gestures.js';
 
@@ -380,21 +383,22 @@ function DirectionCross({ flash = {}, onDir, onCenter, onToggleDetail, detailOpe
   );
 }
 
-// パネルの表示/非表示をワンタップで切り替えるチップ列（Tweaks を開かずに各 HUD を出せる）。
+// パネルの表示/非表示をワンタップで切り替えるチップ帯（Tweaks を開かずに各 HUD を出せる）。
 // on のチップは緑枠で強調。items=[{ key, label, on, toggle }]。
-// 演出ボタン帯と同じく「折り返さない 1 列の帯」にして、はみ出し分はドラッグ/スワイプで
-// 横スクロールする（タッチはネイティブの overflow-x がそのままスライドになる）。
-// スクロールバー非表示は index.html の .cuebar-scroll に依存。
-function PanelToggles({ items, inkColor, subColor, style, children }) {
+// 演出アイコン帯（cuebar）と同じ SlideBar に載せ、⠿ で掴んで移動でき、↕/↔ で縦横を切り替え、
+// はみ出しはスワイプ/ホイール/ドラッグでスライドできる。左下のハンバーガー(twk-fab)は別扱いで
+// 固定位置のまま（この帯だけを可動にする）。スクロールバー表示は index.html の .cuebar-scroll に依存。
+function PanelToggles({ items, inkColor, subColor, dark, dir, onToggleDir, scrollRef, zIndex, defaultStyle, children }) {
   return (
-    <div className="cuebar-scroll" style={{
-      position: 'absolute', zIndex: 6, display: 'flex', gap: 6, flexWrap: 'nowrap',
-      alignItems: 'center', fontFamily: "'Zen Maru Gothic', sans-serif",
-      overflowX: 'auto', overflowY: 'hidden', WebkitOverflowScrolling: 'touch',
-      touchAction: 'pan-x', overscrollBehaviorX: 'contain', overscrollBehaviorY: 'none',
-      padding: '2px 0', // boxShadow/枠が切れない内側余白
-      ...style,
-    }}>
+    <SlideBar
+      id="toggles"
+      dir={dir}
+      onToggleDir={onToggleDir}
+      dark={dark}
+      zIndex={zIndex}
+      scrollRef={scrollRef}
+      defaultStyle={defaultStyle}
+    >
       {items.map(({ key, label, on, toggle, title }) => (
         <button
           key={key}
@@ -403,8 +407,8 @@ function PanelToggles({ items, inkColor, subColor, style, children }) {
           aria-pressed={on}
           title={title || `${label}を${on ? '隠す' : '表示'}`}
           style={{
-            flex: '0 0 auto', // 縮めず一定サイズを保ち、はみ出しは横スクロールへ
-            display: 'inline-flex', alignItems: 'center', lineHeight: 1,
+            flex: '0 0 auto', // 縮めず一定サイズを保ち、はみ出しは帯スクロールへ
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1,
             padding: '4px 10px', borderRadius: 999, cursor: 'pointer', whiteSpace: 'nowrap',
             border: `1.5px solid ${on ? '#46C26A' : 'rgba(127,127,127,0.45)'}`,
             background: on ? 'rgba(70,194,106,0.16)' : 'transparent',
@@ -413,9 +417,16 @@ function PanelToggles({ items, inkColor, subColor, style, children }) {
         >{label}</button>
       ))}
       {children}
-    </div>
+    </SlideBar>
   );
 }
+
+// パネル表示トグル帯（SlideBar）の初期アンカー。row=画面下・ハンバーガーの右、column=左下
+// （ハンバーガーの上）。帯は可動なので、これは「既定レイアウトのヒント」で保証ではない。
+const TOGGLES_DEFAULT_STYLE = {
+  row: { left: 'calc(60px + var(--sal))', bottom: 'calc(28px + var(--sab))' },
+  column: { left: 'calc(14px + var(--sal))', bottom: 'calc(120px + var(--sab))' },
+};
 
 // 演出キュー: 音(tone は合成音フォールバック / sound にパスがあればそれを再生)とスタンプを束ねる。
 // 発火経路は 右端ボタン / 数字キー / ?cue= の3つ共通。後で effect/expression も同じ cue に足せる。
@@ -1684,25 +1695,40 @@ function App() {
   const engineNote = t.useWorker && status.engine === 'main' ? '（フォールバック）' : '';
   const onWorker = status.engine === 'worker';
 
-  // 演出ボタン帯（PC）の cue 列がスクロール可能かを検知する。表示領域(dvh)に対し cue が
-  // 溢れるときだけ上下フェードを出す（短いリストの端が欠けて見えないように）。resize と
-  // visualViewport の変化で測り直し、ブラウザ表示領域の縮小に追従する。
+  // 演出アイコン帯（cuebar）の向き。横帯(row)＝下、縦帯(column)＝左が既定だが、ユーザーが
+  // ⇄/⇅ で切り替えられる。既定はデバイス連動（スマホ→row / PC→column）で従来の見た目を踏襲。
+  // 保存は :panelpref sidecar（テーマ export を汚さない・resetTweaks でも消えない）。
+  const [cueDir, setCueDir] = useState(() => {
+    const saved = loadPanelPref('cuebar');
+    return (saved === 'row' || saved === 'column') ? saved : (isNarrow ? 'row' : 'column');
+  });
+  const toggleCueDir = useCallback(() => {
+    setCueDir((d) => {
+      const next = d === 'row' ? 'column' : 'row';
+      savePanelPref('cuebar', next);
+      return next;
+    });
+  }, []);
+
+  // cue 帯のスクロール要素の ref（CueBar 内のマウスドラッグ／ホイール処理が参照する）。
   const cueScrollRef = useRef(null);
-  const [cueScrollable, setCueScrollable] = useState(false);
-  useEffect(() => {
-    if (isNarrow) { setCueScrollable(false); return undefined; }
-    const el = cueScrollRef.current;
-    if (!el) { setCueScrollable(false); return undefined; }
-    const measure = () => setCueScrollable(el.scrollHeight - el.clientHeight > 1);
-    measure();
-    window.addEventListener('resize', measure);
-    const vv = window.visualViewport;
-    if (vv) vv.addEventListener('resize', measure);
-    return () => {
-      window.removeEventListener('resize', measure);
-      if (vv) vv.removeEventListener('resize', measure);
-    };
-  }, [isNarrow, cueController.cues.length, t.sbButtons]);
+
+  // パネル表示トグル帯（カメラ/デバッグ…）の向き。cuebar と同じ SlideBar に載せ、↕/↔ で
+  // 縦横を切り替える。既定は横帯(row)＝ワイドなテキストチップの帯なので横並びが自然。
+  // 保存は cuebar と別キーの :panelpref sidecar（'toggles'）。
+  const [togglesDir, setTogglesDir] = useState(() => {
+    const saved = loadPanelPref('toggles');
+    return (saved === 'row' || saved === 'column') ? saved : 'row';
+  });
+  const toggleTogglesDir = useCallback(() => {
+    setTogglesDir((d) => {
+      const next = d === 'row' ? 'column' : 'row';
+      savePanelPref('toggles', next);
+      return next;
+    });
+  }, []);
+  // トグル帯のスクロール要素の ref（SlideBar 内のマウスドラッグ／ホイール処理が参照する）。
+  const togglesScrollRef = useRef(null);
 
   // 演出ボタン帯の中身。「編集」トグルは固定（スマホ/PC とも常時表示）、cue 列だけをスクロールさせる
   // ため、トグルと cue 列を別々に組めるよう変数化する。
@@ -1711,7 +1737,12 @@ function App() {
       title="演出を編集（位置・色・音などを調整。cue を右クリック／長押しでも個別に開く）"
       style={{
         flex: '0 0 auto', // 帯では縮ませない（PC では常時表示の要）。
-        width: isNarrow ? 40 : 50, minHeight: isNarrow ? 38 : 34, fontSize: isNarrow ? 9 : 10,
+        // 横帯は移動アイコン/向き切替と同じ細幅・全高（テキストは 編/集 に折返し）。
+        // 縦帯はスリムな縦ストリップに合わせて幅を詰め、高さは位置ボタン(⠿)＝cue と揃える。
+        ...(cueDir === 'row'
+          ? { width: CUEBAR_CTRL_W, alignSelf: 'stretch' }
+          : { width: CUEBAR_COL_W, height: CUEBAR_BTN_H }),
+        fontSize: isNarrow ? 9 : 10,
         fontWeight: 800, lineHeight: 1.15, padding: '3px 2px',
         display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center',
         background: editMode ? (dark ? '#5B8DEF' : '#3B74E8') : (dark ? 'rgba(48,45,42,0.92)' : 'rgba(255,255,255,0.9)'),
@@ -1745,10 +1776,11 @@ function App() {
           : `${c.label}（キー: ${c.key || '-'}）`}
         style={{
           position: 'relative',
-          // 帯では縮ませず溢れさせる＝スクロールの肝。スマホは離すと中央へスナップ（編集中は無効）。
+          // 帯では縮ませず溢れさせる＝スクロールの肝（スワイプ/ホイール/ドラッグで自由スクロール）。
           flex: '0 0 auto',
-          scrollSnapAlign: isNarrow && !editMode ? 'center' : undefined,
-          width: isNarrow ? 40 : 50, height: isNarrow ? 38 : 46, fontSize: isNarrow ? 18 : 21, lineHeight: 1,
+          // 高さはお絵かきツールバーと揃える（帯全体で ~40px）。絵文字も小さめに。
+          // 縦帯（column）は幅を詰めてスリムな縦ストリップにする。
+          width: cueDir === 'column' ? CUEBAR_COL_W : (isNarrow ? 40 : 50), height: CUEBAR_BTN_H, fontSize: 17, lineHeight: 1,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           background: dark ? 'rgba(48,45,42,0.92)' : 'rgba(255,255,255,0.9)',
           border: ring,
@@ -1902,68 +1934,19 @@ function App() {
         ></DrawLayer>
       ) : null}
 
-      {/* 演出ボタン列（操作用・左端中央）。配信(obsMode)/受信(rx)では非表示。設定詳細で表示トグル可。
+      {/* 演出アイコン帯（cuebar）。お絵かきツールバーと同じ DraggablePanel でマウス移動でき、
+          ⇄/⇅ で縦横を切り替えられる。配信(obsMode)/受信(rx)では非表示。設定詳細で表示トグル可。
           編集モード中はオーバーレイ(z30)より上へ出して対象を選べるよう z を上げる。 */}
       {!obsMode && !isRx && t.sbButtons ? (
-        isNarrow ? (
-          // スマホ: 画面下の帯。「編集」トグルは左端に固定（スライドしない）し、cue 列だけを横スクロール。
-          // スクロールバー非表示は index.html の .cuebar-scroll に依存。
-          <div style={{
-            position: 'absolute',
-            // 左下 PanelToggles（1列の帯）・版表記の上へ逃がす。右端はブラウザ端まで使う（幅いっぱい）。
-            bottom: 'calc(78px + var(--sab))',
-            left: 'calc(8px + var(--sal))', right: 'calc(8px + var(--sar))',
-            zIndex: editMode ? 40 : 6,
-            display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6,
-          }}>
-            {cueToggleButton}
-            <div className="cuebar-scroll" style={{
-              flex: '1 1 auto', minWidth: 0, // 残り幅を取り、はみ出し分を横スクロール（縮小可に minWidth:0）
-              display: 'flex', flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', gap: 6,
-              overflowX: 'auto', overflowY: 'hidden', WebkitOverflowScrolling: 'touch',
-              touchAction: 'pan-x', overscrollBehaviorX: 'contain', overscrollBehaviorY: 'none',
-              scrollSnapType: editMode ? 'none' : 'x proximity', // 編集中はスナップ無効（位置調整がガクつかないよう）
-              padding: '4px 6px', // boxShadow が切れない内側余白
-              // 両端フェード（「まだ続く」の示唆）。編集中は対象を全可視にしたいので外す。
-              WebkitMaskImage: editMode ? 'none'
-                : 'linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%)',
-              maskImage: editMode ? 'none'
-                : 'linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%)',
-            }}>
-              {cueButtonList}
-            </div>
-          </div>
-        ) : (
-          // PC: 左端中央。「編集」トグルは固定（flex 0 0 auto）し、cue 列だけを縦スクロール。
-          // 上限高さをブラウザ表示領域(dvh)−上下マージンにし、足りなければ cue 列が縮んで
-          // スクロールする。これで高さが小さくても「編集」は常に見える。
-          // ホイールはネイティブの overflow-y がそのまま縦スクロールに使う（追加 JS 不要）。
-          <div style={{
-            position: 'absolute', left: 'calc(14px + var(--sal))',
-            // 縦は「上12px〜下84px」の帯に収め、その中で中央寄せ(justifyContent:center)する。
-            // 下端を空けて左下のハンバーガー(.twk-fab: bottom32+約40px)・チップ列と重ねない。
-            top: 'calc(12px + var(--sat))', bottom: 'calc(84px + var(--sab))',
-            display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center', gap: 8,
-            zIndex: editMode ? 40 : 6,
-          }}>
-            {cueToggleButton}
-            <div ref={cueScrollRef} className="cuebar-scroll" style={{
-              display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8,
-              // 短いときは伸びず中央寄せ、帯を超えたときだけ縮んでスクロール(flex-shrink + minHeight:0)。
-              flex: '0 1 auto', minHeight: 0,
-              overflowY: 'auto', overflowX: 'hidden',
-              overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch',
-              padding: '2px 0',
-              // スクロール可能なときだけ上下フェード。短いリストでは端を欠かせない。編集中も外す。
-              WebkitMaskImage: !editMode && cueScrollable
-                ? 'linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%)' : 'none',
-              maskImage: !editMode && cueScrollable
-                ? 'linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%)' : 'none',
-            }}>
-              {cueButtonList}
-            </div>
-          </div>
-        )
+        <CueBar
+          dir={cueDir}
+          onToggleDir={toggleCueDir}
+          dark={dark}
+          zIndex={editMode ? 40 : 6}
+          cueScrollRef={cueScrollRef}
+          toggleNode={cueToggleButton}
+          buttons={cueButtonList}
+        ></CueBar>
       ) : null}
 
       {/* 演出の位置調整エディタ（編集中の cue のみマウント）。配信/受信では出さない。 */}
@@ -2013,8 +1996,10 @@ function App() {
       <div style={{
         position: 'absolute',
         top: 'calc(8px + var(--sat))',
-        // PC で左端に演出アイコン帯(幅~50px)が出ているときは、その分だけ右へ寄せて重ねない。
-        // スマホ(帯は画面下)や rx/帯非表示のときは従来どおり左端に置く。
+        // PC の既定では演出アイコン帯(縦帯)が左端に出るので、その分だけ右へ寄せて重ねない。
+        // 帯は今や可動なので、これは「既定レイアウトのヒント」であり保証ではない（帯を動かすと
+        // 多少重なりうるが、このリンク帯は pointerEvents:none のテキストなので実害は無い）。
+        // スマホ(帯は既定で画面下)や rx/帯非表示のときは従来どおり左端に置く。
         left: (!isNarrow && !isRx && t.sbButtons) ? 'calc(76px + var(--sal))' : 'calc(12px + var(--sal))',
         right: 'auto',
         textAlign: 'left', pointerEvents: 'none', whiteSpace: 'nowrap'
@@ -2104,20 +2089,18 @@ function App() {
       )}
 
       {/* 下部コントロール（左下）: 各 HUD のワンタップ表示トグル＋「反映先(OBS/ローカル)」を
-          1行にまとめ、文字/ボタンサイズを統一して折り返す。リセットは Tweaks に集約済み。
-          配信(obs)・rx では非表示。 */}
+          cuebar と同じ SlideBar に載せ、⠿ で掴んで移動でき ↕/↔ で縦横切替。既定は横帯で
+          左下のハンバーガー(twk-fab・固定位置)の右に置く。配信(obs)・rx では非表示。 */}
       {!obsMode && !isRx && (
       <PanelToggles
         inkColor={inkColor}
         subColor={subColor}
-        style={{
-          // 左下のハンバーガー（約40px）の右へ寄せる。折り返さず 1 列の帯にして画面端まで使い、
-          // はみ出しは横スクロール。バージョン表記は 1 段下へ逃がすので右側は空けない（幅いっぱい）。
-          // 下段のバージョンと重ならないよう、この帯とハンバーガーは少し上げる。
-          bottom: isNarrow ? 'calc(30px + var(--sab))' : 'calc(32px + var(--sab))',
-          left: isNarrow ? 'calc(60px + var(--sal))' : 'calc(64px + var(--sal))',
-          maxWidth: 'calc(100vw - 72px - var(--sal) - var(--sar))',
-        }}
+        dark={dark}
+        dir={togglesDir}
+        onToggleDir={toggleTogglesDir}
+        scrollRef={togglesScrollRef}
+        zIndex={6}
+        defaultStyle={TOGGLES_DEFAULT_STYLE}
         items={[
           { key: 'preview', label: 'カメラ', on: t.preview, toggle: () => setTweak('preview', !t.preview) },
           { key: 'debug', label: 'デバッグ', on: t.showDebug, toggle: () => setTweak('showDebug', !t.showDebug) },
@@ -2145,7 +2128,8 @@ function App() {
           onClick={() => setLocalMode((v) => !v)}
           title="ドラッグ移動・ズームの反映先（OBS=rxへ送る / ローカル=この端末だけ。PC は Shift 併用でも『ローカル』）"
           style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6, lineHeight: 1,
+            flex: '0 0 auto', // 帯では縮ませず一定サイズを保つ（はみ出しは帯スクロールへ）
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, lineHeight: 1,
             padding: '4px 10px', borderRadius: 999, cursor: 'pointer', whiteSpace: 'nowrap',
             border: `1.5px solid ${localMode ? '#E8923C' : '#46C26A'}`,
             background: localMode ? 'rgba(232,146,60,0.14)' : 'rgba(70,194,106,0.12)',

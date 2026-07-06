@@ -64,6 +64,15 @@
   .cuebar-scroll { scrollbar-width: none; -ms-overflow-style: none; }
   .cuebar-scroll::-webkit-scrollbar { width: 0; height: 0; display: none; }
   .cuebar-scroll button:focus-visible { outline: 2px solid #3B74E8; outline-offset: 1px; }
+  /* 演出アイコン帯 本体は逆にスクロールバーを表示する（掴んでスライドできるよう細めに）。
+     .cuebar-scroll の非表示指定を後勝ちで上書き。色はテーマ非依存の半透明グレー。 */
+  /* 細いスクロールバーを表示。modern Chromium は scrollbar-width:thin（~10px）を優先し
+     ::-webkit-scrollbar の寸法は無視するため、thin が実質の最小。webkit 指定は旧ブラウザ用。 */
+  .cuebar-scroll--bar { scrollbar-width: thin; -ms-overflow-style: auto; scrollbar-color: rgba(127,127,127,0.5) transparent; }
+  .cuebar-scroll--bar::-webkit-scrollbar { width: 6px; height: 6px; display: block; }
+  .cuebar-scroll--bar::-webkit-scrollbar-thumb { background: rgba(127,127,127,0.5); border-radius: 8px; }
+  .cuebar-scroll--bar::-webkit-scrollbar-thumb:hover { background: rgba(127,127,127,0.75); }
+  .cuebar-scroll--bar::-webkit-scrollbar-track { background: transparent; }
 </style>
 </head>
 <body>

@@ -23,11 +23,21 @@ import {
   savePanelPos,
   clearPanelPos,
   clampPanelPos,
+  resolvePanelAnchor,
+  applyPanelAnchor,
+  panelAnchorStorageKey,
+  loadPanelAnchor,
+  savePanelAnchor,
+  clearPanelAnchor,
   clampPanelSize,
   panelSizeStorageKey,
   loadPanelSize,
   savePanelSize,
   clearPanelSize,
+  panelPrefStorageKey,
+  loadPanelPref,
+  savePanelPref,
+  clearPanelPref,
   sectionStateKey,
   loadSectionState,
   saveSectionState,
@@ -500,6 +510,75 @@ describe('clampPanelPos', () => {
   });
 });
 
+describe('resolvePanelAnchor', () => {
+  const VP = { width: 1000, height: 800 };
+  const SZ = { width: 200, height: 100 };
+
+  it('左上寄りは left/top からの距離で覚える', () => {
+    // 左端 30、上端 20 → どちらも近い端
+    expect(resolvePanelAnchor({ left: 30, top: 20 }, VP, SZ))
+      .toEqual({ ax: 'left', x: 30, ay: 'top', y: 20 });
+  });
+
+  it('右下寄りは right/bottom からの距離で覚える', () => {
+    // left=770 → rightGap = 1000-(770+200)=30 <左Gap770 → right, x=30
+    // top=680 → bottomGap = 800-(680+100)=20 <上Gap680 → bottom, y=20
+    expect(resolvePanelAnchor({ left: 770, top: 680 }, VP, SZ))
+      .toEqual({ ax: 'right', x: 30, ay: 'bottom', y: 20 });
+  });
+
+  it('軸ごとに独立に近い端を選ぶ（左下など）', () => {
+    // left=20 → left, x=20 ／ top=700 → bottomGap=800-800=0 → bottom, y=0
+    expect(resolvePanelAnchor({ left: 20, top: 700 }, VP, SZ))
+      .toEqual({ ax: 'left', x: 20, ay: 'bottom', y: 0 });
+  });
+
+  it('端をはみ出しても距離は 0 以上に丸める', () => {
+    // left=-10（左に食い込み）→ left, x=max(0,-10)=0
+    expect(resolvePanelAnchor({ left: -10, top: 400 }, VP, SZ).x).toBe(0);
+  });
+
+  it('ちょうど中央は左/上（<= で左上優先）を選ぶ', () => {
+    // left=400 → leftGap=400, rightGap=1000-600=400 → tie → left
+    const a = resolvePanelAnchor({ left: 400, top: 350 }, VP, SZ);
+    expect(a.ax).toBe('left');
+    expect(a.ay).toBe('top');
+  });
+});
+
+describe('applyPanelAnchor', () => {
+  const SZ = { width: 200, height: 100 };
+
+  it('left/top アンカーはそのまま距離を再現する', () => {
+    const vp = { width: 1200, height: 900 };
+    expect(applyPanelAnchor({ ax: 'left', x: 30, ay: 'top', y: 20 }, vp, SZ, 8))
+      .toEqual({ left: 30, top: 20 });
+  });
+
+  it('right/bottom アンカーは新しい画面サイズに合わせて端から一定距離を保つ', () => {
+    // 画面が広がっても右端・下端から 30/20 を保つ
+    const vp = { width: 1200, height: 900 };
+    // left = 1200-200-30 = 970, top = 900-100-20 = 780
+    expect(applyPanelAnchor({ ax: 'right', x: 30, ay: 'bottom', y: 20 }, vp, SZ, 8))
+      .toEqual({ left: 970, top: 780 });
+  });
+
+  it('画面が縮んでも端からの距離を保ち、はみ出す分は clamp する', () => {
+    // 狭い画面: width=180 だとパネル(200)が入りきらず左は pad へ丸められる
+    const vp = { width: 180, height: 900 };
+    const r = applyPanelAnchor({ ax: 'right', x: 30, ay: 'top', y: 10 }, vp, SZ, 8);
+    expect(r.left).toBe(8); // clamp（掴める左上を保証）
+    expect(r.top).toBe(10);
+  });
+
+  it('resolve→apply は同じ画面なら元の位置に戻る（往復）', () => {
+    const vp = { width: 1000, height: 800 };
+    const pos = { left: 770, top: 680 };
+    const anchor = resolvePanelAnchor(pos, vp, SZ);
+    expect(applyPanelAnchor(anchor, vp, SZ, 8)).toEqual(pos);
+  });
+});
+
 describe('clampPanelSize', () => {
   const VP = { width: 1000, height: 800 };
   const MIN = { width: 100, height: 48 };
@@ -582,6 +661,57 @@ describe('パネル位置の永続化', () => {
   });
 });
 
+// 端からの相対アンカーの永続化。位置と同じ store モックで検証する。
+describe('パネルアンカーの永続化', () => {
+  let store;
+  beforeEach(() => {
+    store = new Map();
+    globalThis.window = {
+      localStorage: {
+        getItem: (k) => (store.has(k) ? store.get(k) : null),
+        setItem: (k, v) => store.set(k, String(v)),
+        removeItem: (k) => store.delete(k),
+      },
+    };
+  });
+  afterEach(() => {
+    delete globalThis.window;
+  });
+
+  it('panelAnchorStorageKey は panelpos とは別キーにする', () => {
+    expect(panelAnchorStorageKey('cuebar-row', 'tomari-tweaks:camera'))
+      .toBe('tomari-tweaks:camera:panelanchor:cuebar-row');
+  });
+
+  it('save したアンカーを load で取り戻せる', () => {
+    savePanelAnchor('cuebar-row', { ax: 'right', x: 30, ay: 'bottom', y: 20 }, 'k');
+    expect(loadPanelAnchor('cuebar-row', 'k'))
+      .toEqual({ ax: 'right', x: 30, ay: 'bottom', y: 20 });
+  });
+
+  it('未保存なら null', () => {
+    expect(loadPanelAnchor('nope', 'k')).toBeNull();
+  });
+
+  it('壊れた JSON は null', () => {
+    store.set(panelAnchorStorageKey('cuebar-row', 'k'), '{ broken');
+    expect(loadPanelAnchor('cuebar-row', 'k')).toBeNull();
+  });
+
+  it('不正な端名や非数値は null（既定へフォールバック）', () => {
+    store.set(panelAnchorStorageKey('a', 'k'), JSON.stringify({ ax: 'middle', x: 1, ay: 'top', y: 2 }));
+    expect(loadPanelAnchor('a', 'k')).toBeNull();
+    store.set(panelAnchorStorageKey('b', 'k'), JSON.stringify({ ax: 'left', x: 'z', ay: 'top', y: 2 }));
+    expect(loadPanelAnchor('b', 'k')).toBeNull();
+  });
+
+  it('clear で消すと load は null に戻る', () => {
+    savePanelAnchor('cuebar-row', { ax: 'left', x: 5, ay: 'top', y: 6 }, 'k');
+    clearPanelAnchor('cuebar-row', 'k');
+    expect(loadPanelAnchor('cuebar-row', 'k')).toBeNull();
+  });
+});
+
 // パネルサイズ（リサイズ）の永続化。位置と同じ store モックで検証する。
 describe('パネルサイズの永続化', () => {
   let store;
@@ -629,6 +759,61 @@ describe('パネルサイズの永続化', () => {
     savePanelSize('debug', { width: 300, height: 240 }, 'k');
     clearPanelSize('debug', 'k');
     expect(loadPanelSize('debug', 'k')).toBeNull();
+  });
+});
+
+// パネルの汎用文字列 pref（例: 演出帯の向き 'row'/'column'）の永続化。位置/サイズと同じ
+// sidecar 方針で、テーマ export を汚さず resetTweaks でも消えない別キーに置く。値の意味
+// （enum など）は呼び出し側の責務で、ここでは「空でない文字列か」だけを検証する。
+describe('パネル向き設定の永続化', () => {
+  let store;
+  beforeEach(() => {
+    store = new Map();
+    globalThis.window = {
+      localStorage: {
+        getItem: (k) => (store.has(k) ? store.get(k) : null),
+        setItem: (k, v) => store.set(k, String(v)),
+        removeItem: (k) => store.delete(k),
+      },
+    };
+  });
+  afterEach(() => {
+    delete globalThis.window;
+  });
+
+  it('panelPrefStorageKey は :panelpref: を付け id ごとに分ける', () => {
+    expect(panelPrefStorageKey('cuebar', 'tomari-tweaks:camera'))
+      .toBe('tomari-tweaks:camera:panelpref:cuebar');
+    expect(panelPrefStorageKey('other', 'tomari-tweaks:camera'))
+      .toBe('tomari-tweaks:camera:panelpref:other');
+  });
+
+  it('save した文字列を load で取り戻せる（row/column とも往復する）', () => {
+    savePanelPref('cuebar', 'row', 'k');
+    expect(loadPanelPref('cuebar', 'k')).toBe('row');
+    savePanelPref('cuebar', 'column', 'k');
+    expect(loadPanelPref('cuebar', 'k')).toBe('column');
+  });
+
+  it('未保存なら null', () => {
+    expect(loadPanelPref('nope', 'k')).toBeNull();
+  });
+
+  it('空文字は null（未指定扱い）', () => {
+    store.set(panelPrefStorageKey('cuebar', 'k'), '');
+    expect(loadPanelPref('cuebar', 'k')).toBeNull();
+  });
+
+  it('保存値は生の文字列として返す（enum 検証は呼び出し側の責務）', () => {
+    // 想定外の文字列は握りつぶさず素通しし、呼び出し側で既定にフォールバックさせる。
+    store.set(panelPrefStorageKey('cuebar', 'k'), 'diagonal');
+    expect(loadPanelPref('cuebar', 'k')).toBe('diagonal');
+  });
+
+  it('clear で消すと load は null に戻る', () => {
+    savePanelPref('cuebar', 'row', 'k');
+    clearPanelPref('cuebar', 'k');
+    expect(loadPanelPref('cuebar', 'k')).toBeNull();
   });
 });
 
@@ -1032,9 +1217,9 @@ describe('normalizeHexColor', () => {
     expect(normalizeHexColor(null)).toBeNull();
     expect(normalizeHexColor(0xffffff)).toBeNull();
   });
-  it('DEFAULT_CUE_COLOR は白の #rrggbb', () => {
-    expect(DEFAULT_CUE_COLOR).toBe('#ffffff');
-    expect(normalizeHexColor(DEFAULT_CUE_COLOR)).toBe('#ffffff');
+  it('DEFAULT_CUE_COLOR は赤の #rrggbb', () => {
+    expect(DEFAULT_CUE_COLOR).toBe('#ff0000');
+    expect(normalizeHexColor(DEFAULT_CUE_COLOR)).toBe('#ff0000');
   });
 });
 

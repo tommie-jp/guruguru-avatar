@@ -384,6 +384,83 @@ export function clampPanelPos(pos, viewport, size, pad = 8) {
   };
 }
 
+// ── パネル位置の「端からの相対（アンカー）」表現 ─────────────────────────────
+// 端に寄せて置く帯（cuebar / パネル表示トグル帯）向けに、位置を左上固定の {left, top} で
+// はなく「近い方の端からの距離」で覚える。こうするとブラウザをリサイズしても、下端寄りの帯は
+// 下端から、右端寄りの帯は右端から一定距離を保って追従する（left/top 固定だと下/右へ寄せた帯が
+// リサイズで端から離れてしまう）。軸ごとに独立に近い端を選ぶ純関数で、DOM 非依存・テスト容易。
+//
+// アンカー形: { ax:'left'|'right', x:number, ay:'top'|'bottom', y:number }。
+//   x = ax 側の端からパネルの同じ側の辺までの距離、y も同様（いずれも 0 以上）。
+
+// {left, top} を「近い方の端からの相対アンカー」に変換する（軸ごとに近い端を採用）。
+export function resolvePanelAnchor(pos, viewport, size) {
+  const leftGap = pos.left;
+  const rightGap = viewport.width - (pos.left + size.width);
+  const ax = leftGap <= rightGap ? 'left' : 'right';
+  const x = Math.max(0, ax === 'left' ? leftGap : rightGap);
+
+  const topGap = pos.top;
+  const bottomGap = viewport.height - (pos.top + size.height);
+  const ay = topGap <= bottomGap ? 'top' : 'bottom';
+  const y = Math.max(0, ay === 'top' ? topGap : bottomGap);
+
+  return { ax, x, ay, y };
+}
+
+// 相対アンカーを、いまのビューポート／サイズに合わせて {left, top} へ戻す（画面内へ clamp 済み）。
+export function applyPanelAnchor(anchor, viewport, size, pad = 8) {
+  const left = anchor.ax === 'right'
+    ? viewport.width - size.width - anchor.x
+    : anchor.x;
+  const top = anchor.ay === 'bottom'
+    ? viewport.height - size.height - anchor.y
+    : anchor.y;
+  return clampPanelPos({ left, top }, viewport, size, pad);
+}
+
+// アンカーの永続化。位置(panelpos)と同じ sidecar 方針で、端寄せ帯は {left,top} ではなく
+// このアンカー形で覚える。読み書き不可・壊れ・不正な端名は null（＝既定へフォールバック）。
+export function panelAnchorStorageKey(id, explicit) {
+  return tweaksStorageKey(explicit) + ':panelanchor:' + id;
+}
+
+export function loadPanelAnchor(id, explicit) {
+  try {
+    const raw = window.localStorage.getItem(panelAnchorStorageKey(id, explicit));
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (isPlainObject(o)
+        && (o.ax === 'left' || o.ax === 'right')
+        && (o.ay === 'top' || o.ay === 'bottom')
+        && Number.isFinite(o.x) && Number.isFinite(o.y)) {
+      return { ax: o.ax, x: o.x, ay: o.ay, y: o.y };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function savePanelAnchor(id, anchor, explicit) {
+  try {
+    window.localStorage.setItem(
+      panelAnchorStorageKey(id, explicit),
+      JSON.stringify({ ax: anchor.ax, x: anchor.x, ay: anchor.ay, y: anchor.y }),
+    );
+  } catch {
+    /* 容量超過やプライベートモードでは黙って諦める */
+  }
+}
+
+export function clearPanelAnchor(id, explicit) {
+  try {
+    window.localStorage.removeItem(panelAnchorStorageKey(id, explicit));
+  } catch {
+    /* 読み書き不可でも無視（既定位置に戻るだけ） */
+  }
+}
+
 // ── パネルサイズ（リサイズ）の永続化 ─────────────────────────────────────────
 // 位置(panelpos)と同様、ページ × パネル id 単位で {width, height}(px) を覚える。
 // 読み書き不可・壊れ・非正値は null（＝サイズ未指定＝中身なりのサイズにフォールバック）。
@@ -434,6 +511,43 @@ export function clampPanelSize(size, viewport, pad = 8, min = { width: 100, heig
     width: Math.min(maxW, Math.max(min.width, size.width)),
     height: Math.min(maxH, Math.max(min.height, size.height)),
   };
+}
+
+// ── パネルの汎用文字列 pref の永続化 ─────────────────────────────────────────
+// 位置(panelpos)/サイズ(panelsize)と同じ sidecar 方針で、パネルごとの小さな UI 設定
+// （例: 演出帯の向き 'row'/'column'）を「値」とは別キーに覚える。値に混ぜると
+// mergeIntoDefaults で落ち、テーマ export を汚し、resetTweaks で消えるため分離する。
+// 保存するのは素の文字列 1 個。意味付け（enum など）は呼び出し側の責務で、ここでは
+// 「空でない文字列か」だけを見て、想定外の値は素通しして呼び出し側の既定にフォールバック
+// させる（loadPanelPos が形だけ検証するのと同じ流儀）。
+export function panelPrefStorageKey(id, explicit) {
+  return tweaksStorageKey(explicit) + ':panelpref:' + id;
+}
+
+// 保存文字列を返す。未保存・空文字・読取不可は null（＝既定を使う合図）。
+export function loadPanelPref(id, explicit) {
+  try {
+    const raw = window.localStorage.getItem(panelPrefStorageKey(id, explicit));
+    return (typeof raw === 'string' && raw !== '') ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+export function savePanelPref(id, value, explicit) {
+  try {
+    window.localStorage.setItem(panelPrefStorageKey(id, explicit), String(value));
+  } catch {
+    /* 容量超過やプライベートモードでは黙って諦める */
+  }
+}
+
+export function clearPanelPref(id, explicit) {
+  try {
+    window.localStorage.removeItem(panelPrefStorageKey(id, explicit));
+  } catch {
+    /* 読み書き不可でも無視（既定に戻るだけ） */
+  }
 }
 
 // ── fork:sections ── 折りたたみセクションの開閉状態（{ ラベル: 開いているか }）。
@@ -600,9 +714,9 @@ export function clearCueTexts(explicit) {
 }
 
 // ── fork:cue-color ── 演出（スタンプ）の cue 毎カスタム文字色 { [cueId]: '#rrggbb' } ──
-// cue-stamp の既定文字色（白 = DEFAULT_CUE_COLOR）を任意の色で上書きする。:cuetext と同じく
-// ローカル限定・テーマ非連携の独立キー（:cuecolor）。既定（白）一致は保存しない（呼び出し側で削除）。
-export const DEFAULT_CUE_COLOR = '#ffffff';
+// cue-stamp の既定文字色（赤 = DEFAULT_CUE_COLOR）を任意の色で上書きする。:cuetext と同じく
+// ローカル限定・テーマ非連携の独立キー（:cuecolor）。既定（赤）一致は保存しない（呼び出し側で削除）。
+export const DEFAULT_CUE_COLOR = '#ff0000';
 
 export function cueColorStorageKey(explicit) {
   return tweaksStorageKey(explicit) + ':cuecolor';

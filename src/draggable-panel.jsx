@@ -2,6 +2,8 @@ import React from 'react';
 import {
   loadPanelPos, savePanelPos, clearPanelPos, clampPanelPos,
   loadPanelSize, savePanelSize, clearPanelSize, clampPanelSize,
+  loadPanelAnchor, savePanelAnchor, clearPanelAnchor,
+  resolvePanelAnchor, applyPanelAnchor,
 } from './use-tweaks.js';
 
 // fork: ドラッグで移動・リサイズできる汎用パネル枠（本家 scaffold には無い追加）。
@@ -18,6 +20,12 @@ import {
 //    （ページ × id 単位）。サイズは React 管理外（inline style）で持ち、毎フレーム再描画の
 //    パネルでも上書きされないよう imperative に当てる（中身だけの再描画と競合させない）。
 //  - リサイズ: 画面が縮んでパネルが外へ出たら内側へ再クランプ。
+//
+// anchorEdges: 端に寄せて置く帯（cuebar / パネル表示トグル帯）向けの位置モデル切替。
+//   通常は位置を左上固定の {left, top} で覚えるが、これを true にすると「軸ごとに近い方の端
+//   からの距離」で覚える（下端寄りは下端から、右端寄りは右端から一定距離）。ブラウザを
+//   リサイズしても端からの距離を保って追従する（left/top 固定だと下/右へ寄せた帯がリサイズで
+//   端から離れてしまう）。一度も動かしていない既定位置のうちは従来どおり（アンカー未設定）。
 //
 // 位置モデルは left/top（px・position:fixed）に統一する。初期位置は呼び出し側が
 // defaultStyle（例 {top:16,left:16}）で“アンカー”を渡し、初回レンダーの実測矩形を
@@ -41,6 +49,7 @@ function DraggablePanel({
   closeLabel = 'このパネルを隠す',
   title,
   resizable = true,
+  anchorEdges = false,
   defaultWidth,
   className,
   style,
@@ -52,6 +61,7 @@ function DraggablePanel({
   const [pos, setPos] = React.useState(null); // {left, top}。null=既定アンカーで配置中
   const posRef = React.useRef(null);          // 最新位置（move ハンドラから参照）
   const defaultRef = React.useRef(null);       // 初回実測の既定位置（ダブルクリック復帰用）
+  const anchorRef = React.useRef(null);        // 端からの相対アンカー（anchorEdges 時のみ。未設定=既定）
   const userResizedRef = React.useRef(false);  // グリップを掴んだら true（以降サイズを保存）
 
   const sizeOf = React.useCallback(() => {
@@ -86,11 +96,32 @@ function DraggablePanel({
     const r = el.getBoundingClientRect();
     const def = clamp({ left: r.left, top: r.top });
     defaultRef.current = def;
-    const saved = loadPanelPos(id);
-    const init = saved ? clamp(saved) : def;
+    let init;
+    if (anchorEdges) {
+      // 端からの相対アンカーで復元。保存アンカー → 旧 {left,top} からの移行 → 既定、の順。
+      // 既定（未ドラッグ）のうちはアンカー未設定のまま従来挙動にする（中央寄せ帯などを端へ寄せない）。
+      const vp = viewport();
+      const size = sizeOf();
+      const savedAnchor = loadPanelAnchor(id);
+      if (savedAnchor) {
+        anchorRef.current = savedAnchor;
+        init = applyPanelAnchor(savedAnchor, vp, size, PAD);
+      } else {
+        const legacy = loadPanelPos(id);
+        if (legacy) {
+          init = clamp(legacy);
+          anchorRef.current = resolvePanelAnchor(init, vp, size);
+        } else {
+          init = def; // 未ドラッグ＝アンカー未設定（リサイズは従来の再クランプに委ねる）
+        }
+      }
+    } else {
+      const saved = loadPanelPos(id);
+      init = saved ? clamp(saved) : def;
+    }
     posRef.current = init;
     setPos(init);
-  }, [disabled, id, resizable, defaultWidth, clamp]);
+  }, [disabled, id, resizable, anchorEdges, defaultWidth, clamp, sizeOf]);
 
   // リサイズ永続化。ユーザーが右下グリップを掴んだ後だけ保存する（中身だけの再描画では保存しない）。
   React.useEffect(() => {
@@ -111,17 +142,20 @@ function DraggablePanel({
     return () => { clearTimeout(timer); ro.disconnect(); };
   }, [disabled, resizable, id]);
 
-  // リサイズで画面外に出たら内側へ戻す。
+  // リサイズ追従。anchorEdges でアンカーがあれば「端からの距離」を保って再配置し、
+  // それ以外は画面外に出た分だけ内側へ再クランプする。
   React.useEffect(() => {
     const onResize = () => {
       if (disabled || !posRef.current) return;
-      const c = clamp(posRef.current);
-      posRef.current = c;
-      setPos(c);
+      const next = (anchorEdges && anchorRef.current)
+        ? applyPanelAnchor(anchorRef.current, viewport(), sizeOf(), PAD)
+        : clamp(posRef.current);
+      posRef.current = next;
+      setPos(next);
     };
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, [disabled, clamp]);
+  }, [disabled, anchorEdges, clamp, sizeOf]);
 
   const onPointerDown = (e) => {
     // ✕・中のコントロールなどドラッグさせたくない要素の上では開始しない。
@@ -158,7 +192,15 @@ function DraggablePanel({
       el.removeEventListener('pointermove', move);
       el.removeEventListener('pointerup', up);
       el.removeEventListener('pointercancel', up);
-      if (posRef.current) savePanelPos(id, posRef.current);
+      if (!posRef.current) return;
+      if (anchorEdges) {
+        // 落とした場所の「近い端からの距離」を覚える（以降リサイズはこれに追従）。
+        const a = resolvePanelAnchor(posRef.current, viewport(), sizeOf());
+        anchorRef.current = a;
+        savePanelAnchor(id, a);
+      } else {
+        savePanelPos(id, posRef.current);
+      }
     };
     el.addEventListener('pointermove', move);
     el.addEventListener('pointerup', up);
@@ -169,6 +211,8 @@ function DraggablePanel({
   const onResetPos = () => {
     clearPanelPos(id);
     clearPanelSize(id);
+    clearPanelAnchor(id);
+    anchorRef.current = null;
     userResizedRef.current = false;
     const el = ref.current;
     if (el) { el.style.width = ''; el.style.height = ''; }

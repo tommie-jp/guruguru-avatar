@@ -34,8 +34,8 @@ const clampNum = (v, lo, hi, def) => (Number.isFinite(v) ? Math.max(lo, Math.min
 //   initial     … 現在の保存オフセット { x, y }（未保存なら undefined → {0,0}）
 //   initialText … 現在の実効スタンプ文字（上書き優先・無ければ既定 stamp）。入力欄の初期値。
 //   defaultText … cue の既定 stamp（↺既定の戻し先・placeholder）。
-//   initialColor… 現在の実効文字色 '#rrggbb'（上書き優先・無ければ既定の白）。色入力の初期値。
-//   defaultColor… 既定の文字色 '#rrggbb'（白）。↺既定の戻し先。
+//   initialColor… 現在の実効文字色 '#rrggbb'（上書き優先・無ければ既定の赤）。色入力の初期値。
+//   defaultColor… 既定の文字色 '#rrggbb'（赤）。↺既定の戻し先。
 //   initialSize … 現在の実効フォント倍率（数値・既定 1.0）。サイズスライダの初期値。
 //   defaultSize … 既定のフォント倍率（1.0）。↺既定の戻し先。
 //   initialShadow… 現在の実効影色 '#rrggbb'（既定の濃茶）。影色入力の初期値。
@@ -332,7 +332,7 @@ function CueOffsetEditor({
               }}
             />
           </div>
-          {/* 文字色: 既定（白）に戻すには ↺既定。<input type="color"> は常に #rrggbb を返す。 */}
+          {/* 文字色: 既定（赤）に戻すには ↺既定。<input type="color"> は常に #rrggbb を返す。 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}>
             <span style={{ opacity: 0.82 }}>文字の色</span>
             <input
@@ -543,7 +543,12 @@ function CueOffsetEditor({
             <span>左右 {pct(draft.x)}</span>
             <span>上下 {pct(draft.y)}</span>
           </div>
-          <div style={{ display: 'flex', gap: 6 }}>
+        </div>
+        {/* 操作ボタンはスクロール対象外の固定フッタ。項目が多くても 保存/やめる/既定 が常に押せるように。 */}
+        <div data-no-drag style={{
+          display: 'flex', gap: 6, marginTop: 10, paddingTop: 10,
+          borderTop: `1px solid ${dark ? 'rgba(255,248,238,0.14)' : 'rgba(60,48,38,0.12)'}`,
+        }}>
             <button
               type="button"
               data-no-drag
@@ -592,7 +597,6 @@ function CueOffsetEditor({
               style={btnStyle(dark)}
             >↺ 既定</button>
           </div>
-        </div>
       </DraggablePanel>
     </>
   );
