@@ -1,7 +1,7 @@
 {
   "name": "guruguru-avatar",
   "private": true,
-  "version": "1.10.2",
+  "version": "1.12.0",
   "description": "Webカメラの顔の動きに同調する配信向けアバター（OBS 透過オーバーレイ対応）",
   "type": "module",
   "main": "electron/main.mjs",
