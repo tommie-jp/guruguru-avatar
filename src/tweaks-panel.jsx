@@ -72,7 +72,7 @@ import {
 
 const __TWEAKS_STYLE = `
   .twk-fab{position:fixed;left:calc(16px + env(safe-area-inset-left));
-    bottom:calc(32px + env(safe-area-inset-bottom));z-index:2147483646;
+    bottom:calc(58px + env(safe-area-inset-bottom));z-index:2147483646;
     appearance:none;border:0;border-radius:999px;padding:9px;
     display:inline-flex;align-items:center;justify-content:center;
     background:rgba(41,38,27,.86);color:#fff;
@@ -222,7 +222,7 @@ const __TWEAKS_STYLE = `
   @media (max-width:480px){
     .twk-panel{width:calc(100vw - 24px);right:12px;bottom:12px;max-height:72vh}
     .twk-fab{left:calc(12px + env(safe-area-inset-left));
-      bottom:calc(30px + env(safe-area-inset-bottom));padding:11px}
+      bottom:calc(56px + env(safe-area-inset-bottom));padding:11px}
     .twk-hd{padding:12px 10px 12px 16px}
     .twk-hd b{font-size:16px}
     .twk-x{width:32px;height:32px;font-size:18px}

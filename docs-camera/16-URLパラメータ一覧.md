@@ -17,6 +17,7 @@ camera 版（`index.html`）が起動時に解析する URL クエリの早見�
 | `?obs` | （フラグ）/ `1` / `0` | **ステージモード**（背景透過＋UI 非表示）。三状態。[10](10-OBSでライブ配信.md) | 未指定なら rx のとき ON |
 | `?draw` | （フラグ）/ `1` / `0` | **お絵かきオーバーレイ**。既定で有効（下部「お絵かき」ボタンで ON/OFF）。`?draw=0` で無効化。[18](18-お絵かきオーバーレイ.md) | tx・local は ON／rx は受信表示 |
 | `?ticker` | （フラグ）/ `1` / `0` | **テロップ（CNN 風・下部クロール）**。既定でマウント（コントロールで表示 ON/OFF）。`?ticker=0` で無効化。[19](19-テロップ.md) | tx・local は操作／rx は受信表示 |
+| `?clock` | （フラグ）/ `1` / `0` | **日付時刻テロップ（右上の時計）**。既定でマウント（コントロールで表示 ON/OFF）。`?clock=0` で無効化。[20](20-時計.md) | tx・local は操作／rx は受信表示 |
 | `?avatar` | `<id>` | 表示アバターを固定（OBS シーン用）。セレクタより優先。[31](31-アバターの追加.md) | 保存値／既定 |
 | `?camera` | `<ラベル>` / `<番号>` | 使うカメラを固定（OBS シーン用）。[15](15-カメラ切り替え.md) | 保存値／既定 |
 
@@ -165,6 +166,6 @@ http://localhost:5173/index.html?rx&obs           # OBS（受信表示）
 - ラベルやアバター id に空白・記号が入るときは URL エンコードする（`?camera=Front%20Camera`）。
 - 各パラメータは独立で、同時指定しても衝突しない（`?rx&obs=0&avatar=…&camera=…` など）。
 - 解析の実体は純関数: `src/relay-mode.js`（tx/rx/relay）・`src/obs-mode.js`（obs）・
-  `src/draw-mode.js`（draw）・`src/camera-config.js`（camera）・`src/camera-app.jsx` 内
-  `parseAvatarParam`（avatar）。いずれも単体テスト付き。
+  `src/draw-mode.js`（draw）・`src/ticker-config.js`（ticker）・`src/clock-config.js`（clock）・
+  `src/camera-config.js`（camera）・`src/camera-app.jsx` 内 `parseAvatarParam`（avatar）。いずれも単体テスト付き。
 - 影（`shadow`）は URL ではなく Tweaks 値。tx で調整 → config 同期で rx に反映される。

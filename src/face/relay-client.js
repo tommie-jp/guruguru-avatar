@@ -21,6 +21,9 @@
 //                       （CNN 風の下部テロップ設定。累積状態＝変更時のみ送るので後着 OBS へは
 //                        need-config で再送する（draw-scene と同様）。クロールのアニメは rx が
 //                        設定からローカル駆動するので、毎フレームは流れない）
+//       clock         : { type:'clock', data:{ visible, textColor, bgColor, fontSize } }  producer→consumer
+//                       （日付時刻テロップの設定。時刻そのものは同期せず各端末がローカル時刻を描く。
+//                        累積状態＝変更時のみ送り、後着 OBS へは need-config で再送する）
 //       need-config   : { type:'need-config' }         server→producer（CEF 接続時の要求）
 //       peer          : { type:'peer', ... }           server→producer（CEF 接続/切断の通知）
 //
@@ -41,15 +44,16 @@ const MAX_BACKOFF_MS = 8000;
  * @param {(data:{phase:string,id:number,pts?:Array,color?:string,width?:number,w?:number,h?:number})=>void} [o.onDrawLive]  draw-live 受信（rx 用・描画途中のライブストローク）
  * @param {(data:{x:number,y:number,w:number,h:number,show:boolean})=>void} [o.onCursor]  cursor 受信（rx 用・マウスカーソル）
  * @param {(data:{text:string,bgColor:string,textColor:string,speed:number,visible:boolean,posY:number,opacity:number})=>void} [o.onTicker]  ticker 受信（rx 用・テロップ設定）
+ * @param {(data:{visible:boolean,textColor:string,bgColor:string,fontSize:number})=>void} [o.onClock]  clock 受信（rx 用・時計設定）
  * @param {()=>void} [o.onNeedConfig]                  config 要求受信（tx 用）
  * @param {(msg:object)=>void} [o.onPeer]              接続通知受信（tx 用）
  * @param {(s:{connected:boolean})=>void} [o.onStatus] 自身の接続状態変化
  * @param {(url:string)=>WebSocket} [o.makeSocket]     テスト用の差し替え口
- * @returns {{ sendState:Function, sendConfig:Function, sendCue:(id:string, over?:{stamp?:string,color?:string})=>void, sendDrawScene:(data:object)=>void, sendDrawLive:(data:object)=>void, sendCursor:(data:object)=>void, sendTicker:(data:object)=>void, close:()=>void }}
+ * @returns {{ sendState:Function, sendConfig:Function, sendCue:(id:string, over?:{stamp?:string,color?:string})=>void, sendDrawScene:(data:object)=>void, sendDrawLive:(data:object)=>void, sendCursor:(data:object)=>void, sendTicker:(data:object)=>void, sendClock:(data:object)=>void, close:()=>void }}
  */
 export function createRelayClient(o) {
   const {
-    url, role, onState, onConfig, onCue, onDrawScene, onDrawLive, onCursor, onTicker, onNeedConfig, onPeer, onStatus,
+    url, role, onState, onConfig, onCue, onDrawScene, onDrawLive, onCursor, onTicker, onClock, onNeedConfig, onPeer, onStatus,
     makeSocket = (u) => new WebSocket(u),
   } = o;
 
@@ -89,6 +93,7 @@ export function createRelayClient(o) {
         case 'draw-live': onDrawLive?.(msg.data); break;
         case 'cursor': onCursor?.(msg.data); break;
         case 'ticker': onTicker?.(msg.data); break;
+        case 'clock': onClock?.(msg.data); break;
         case 'need-config': onNeedConfig?.(); break;
         case 'peer': onPeer?.(msg); break;
         default: break;
@@ -142,6 +147,7 @@ export function createRelayClient(o) {
     sendDrawLive(data) { rawSend(JSON.stringify({ type: 'draw-live', data })); },
     sendCursor(data) { rawSend(JSON.stringify({ type: 'cursor', data })); },
     sendTicker(data) { rawSend(JSON.stringify({ type: 'ticker', data })); },
+    sendClock(data) { rawSend(JSON.stringify({ type: 'clock', data })); },
     close() {
       closed = true;
       clearTimeout(reconnectTimer);

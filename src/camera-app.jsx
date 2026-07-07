@@ -10,6 +10,7 @@ import { parseObsParams } from './obs-mode';
 import { parseRelayMode } from './relay-mode';
 import { parseDrawParams } from './draw-mode';
 import { parseTickerParams } from './ticker-config';
+import { parseClockParams } from './clock-config';
 import { computeStateFrame, createExprState } from './face/avatar-state';
 import { computeDirectionRange, rawDirForDisplay } from './face/direction-range';
 import {
@@ -30,6 +31,7 @@ import { createCueController, isTypingTarget, parseCueParam } from './cue-system
 import { CueStampLayer } from './cue-stamp.jsx';
 import { DrawLayer } from './draw-layer.jsx';
 import { TickerLayer } from './ticker-layer.jsx';
+import { ClockLayer } from './clock-layer.jsx';
 import { CueOffsetEditor } from './cue-offset-editor.jsx';
 import { CueBar, CUEBAR_CTRL_W, CUEBAR_COL_W, CUEBAR_BTN_H } from './cue-bar.jsx';
 import { SlideBar } from './slide-bar.jsx';
@@ -604,6 +606,16 @@ function App() {
   const tickerSendRef = useRef(null); // relayApi.sendTicker を後で差す（render 末で代入）
   // tx: テロップ設定が変わったら relay で rx(OBS) へ送る。relayApi は毎レンダー変わるので ref 越しに呼ぶ。
   const handleTickerChange = useCallback((cfg) => { tickerSendRef.current?.(cfg); }, []);
+  // 日付時刻テロップ（右上の時計）。お絵かき/テロップとは独立。rx は受信表示(view)、tx/local は操作(edit)。
+  // ?clock=0 のときだけ off。URL は起動時固定なので一度だけ解析。
+  const clockParam = useMemo(
+    () => parseClockParams(typeof window !== 'undefined' ? window.location.search : ''),
+    [],
+  );
+  const clockMode = isRx ? 'view' : (clockParam.clock === false ? 'off' : 'edit');
+  const clockLayerRef = useRef(null);
+  const clockSendRef = useRef(null); // relayApi.sendClock を後で差す（render 末で代入）
+  const handleClockChange = useCallback((cfg) => { clockSendRef.current?.(cfg); }, []);
   const [panelOpen, setPanelOpen] = useState(false); // obsMode 中に T キーで Tweaks を開閉
   // rx は受信した設定で描画し、それ以外はローカルの tweaks を使う。
   const [rxConfig, setRxConfig] = useState(TWEAK_DEFAULTS);
@@ -1075,6 +1087,8 @@ function App() {
     getDrawScene: () => drawLayerRef.current?.getScene() ?? null,
     // tx: 後着 OBS(rx) へ現在のテロップ設定を再送する（非表示・空なら null）。
     getTicker: () => tickerLayerRef.current?.getConfig() ?? null,
+    // tx: 後着 OBS(rx) へ現在の時計設定を再送する（非表示なら null）。
+    getClock: () => clockLayerRef.current?.getConfig() ?? null,
     onState: (arr) => { latestFrameRef.current = decodeStateFrame(arr); },
     onConfig: (cfg) => setRxConfig((prev) => ({ ...prev, ...cfg })),
     // rx: 受信したお絵かきシーンを再描画（DrawLayer 側で件数・サイズを検証）。
@@ -1085,6 +1099,8 @@ function App() {
     onCursor: (data) => drawLayerRef.current?.setCursor(data),
     // rx: 受信したテロップ設定を反映（TickerLayer 側で文言・色・速度を検証）。
     onTicker: (data) => tickerLayerRef.current?.setConfig(data),
+    // rx: 受信した時計設定を反映（ClockLayer 側で色・サイズを検証）。
+    onClock: (data) => clockLayerRef.current?.setConfig(data),
     // rx: tx から来た演出をこの端末(OBS)で再生。カスタム文字/色が同梱されていれば一時オーバーライドに
     // 積んで run（同期）→ pop コールバックが拾う→直後に clear。relay 値は信頼私設網前提だが念のため検証する。
     onCue: (id, over) => {
@@ -1120,6 +1136,8 @@ function App() {
   cursorSendRef.current = relayApi.sendCursor;
   // テロップ設定の送信口も毎レンダー差し替える。
   tickerSendRef.current = relayApi.sendTicker;
+  // 時計設定の送信口も毎レンダー差し替える。
+  clockSendRef.current = relayApi.sendClock;
 
   // tx: 設定が変わったら CEF へ config を送る（数秒ごとの再送はしない＝変更時のみ）。
   useEffect(() => {
@@ -1967,6 +1985,22 @@ function App() {
             bottom: isNarrow ? 'calc(164px + var(--sab))' : 'calc(138px + var(--sab))',
           }}
         ></TickerLayer>
+      ) : null}
+
+      {/* 日付時刻テロップ（右上の時計・お絵かき/テロップとは独立）。tx/local は操作(edit)、rx(OBS)は受信表示(view)。
+          時刻は各端末がローカルで毎秒更新。コントロールUIは edit かつ非配信(!obsMode)のときだけ出す。 */}
+      {clockMode !== 'off' ? (
+        <ClockLayer
+          ref={clockLayerRef}
+          mode={clockMode}
+          showControls={clockMode === 'edit' && !obsMode}
+          onConfigChange={handleClockChange}
+          // 既定位置は上部中央（右上の時計とは別の場所）。中央寄せ。
+          controlsDefaultStyle={{
+            left: '50%', transform: 'translateX(-50%)',
+            top: 'calc(10px + var(--sat))',
+          }}
+        ></ClockLayer>
       ) : null}
 
       {/* 演出アイコン帯（cuebar）。お絵かきツールバーと同じ DraggablePanel でマウス移動でき、
